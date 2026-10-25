@@ -1,0 +1,31 @@
+# Local datasets, checkpoints and run outputs
+/data/
+/checkpoints/
+/outputs/
+
+# Local experiment tracking files
+/wandb/
+/mlruns/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Credentials and local environment variables
+.env
+.env.*
+!.env.example
+kaggle.json
+
+# Operating system files
+.DS_Store
+Thumbs.db
