@@ -35,7 +35,7 @@ Phân tích bổ sung	Độ nhạy theo số mẫu mỗi lớp
 Khảo sát chi phí	Bộ nhớ và thời gian theo số lớp/số chiều đặc trưng
 
 
-TODO trước các run chính: ghi rõ bảng/hình được tái hiện, baseline cần thiết, số lớp task đầu, increment, class order, seed, preprocessing và cấu hình training trong docs/protocol.md.
+Protocol data/backbone đã chốt trong [docs/protocol.md](docs/protocol.md): CIFAR-100 B=50, increment=10, class-order seed=1993, training seed=1. Xem [hướng dẫn pipeline](docs/data-backbone.md) và [kết quả kiểm chứng](docs/data-backbone-validation.md). Classifier và đánh giá incremental chưa được tích hợp.
 
 Các run rút gọn dùng để kiểm tra pipeline phải được gắn nhãn smoke-test, không trình bày như kết quả tái hiện đầy đủ. NCM không thay thế toàn bộ các baseline cần thiết cho so sánh chính.
 4. Thành viên và phân công
@@ -52,7 +52,7 @@ Review chéo: Phú review TV2; TV2 review TV3; TV3 review Phú.
 Đường dẫn	Công dụng	Theo dõi bằng Git
 configs/	Cấu hình chạy thử, tái hiện, phân tích và nghiên cứu	Có
 src/	Implementation, pipeline dữ liệu, backbone và đánh giá	Có
-scripts/	Chạy thí nghiệm, tổng hợp bảng và vẽ đồ thị	Có
+src/scripts/	Chạy thí nghiệm, tổng hợp bảng và vẽ đồ thị	Có
 tests/	Kiểm tra tính đúng của chia task, classifier và metrics	Có
 docs/	Method, protocol, evaluation, critique và related work	Có
 notebooks/	Notebook chạy Colab/Kaggle và khảo sát	Có; tránh output lớn
@@ -75,18 +75,18 @@ Kích hoạt trên Windows PowerShell:
 .venv\Scripts\Activate.ps1
 Hoặc Linux/macOS:
 source .venv/bin/activate
-Sau khi nhóm điền dependencies đã kiểm chứng vào requirements.txt:
+Dependencies data/backbone đã được ghi trong requirements.txt; cài PyTorch phù hợp CPU/CUDA theo [hướng dẫn pipeline](docs/data-backbone.md) trước, sau đó:
 python -m pip install -r requirements.txt
 Dữ liệu, checkpoint và lệnh thực nghiệm
 - Dữ liệu phải được tải và chuẩn bị bằng code từ nguồn Hugging Face/Kaggle phù hợp; ghi rõ nguồn, phiên bản và cách xử lý trong tài liệu protocol.
 - Checkpoint dùng chung cần có URL tải, nguồn gốc, cấu hình huấn luyện và mã kiểm tra khi có. Không commit file trọng số vào Git.
 - Cache đặc trưng không được dùng để truy cập lại mẫu lớp cũ hoặc lớp tương lai trái với protocol exemplar-free đã chọn.
 - Không đưa token hoặc API key vào notebook, config hay repository.
-TODO: bổ sung lệnh thực tế sau khi entry point được triển khai và kiểm tra. Hiện README chưa cam kết có lệnh chạy end-to-end hoạt động.
+Entry point data/backbone nằm ở `src/scripts/run_experiment.py`. Xem lệnh chuẩn bị dữ liệu, smoke training và nạp checkpoint trong [docs/data-backbone.md](docs/data-backbone.md). Luồng này chưa chạy end-to-end FeCAM/NCM.
 Tác vụ	Lệnh đã kiểm chứng
-Tải và chuẩn bị dữ liệu	TODO
-Chạy smoke test	TODO
-Huấn luyện backbone task đầu	TODO
+Tải và chuẩn bị dữ liệu	python src/scripts/run_experiment.py prepare --config configs/reproduction/cifar100_fecam.yaml
+Chạy smoke backbone	python src/scripts/run_experiment.py train-base --config configs/smoke.yaml
+Huấn luyện backbone task đầu	Xem docs/data-backbone.md; cấu hình đầy đủ 200 epoch chưa chạy
 Tái hiện FeCAM và baseline	TODO
 Chạy phân tích/stress-test	TODO
 Tổng hợp bảng và vẽ hình	TODO
@@ -99,7 +99,7 @@ W&B dùng các tag phân biệt: smoke-test, reproduction, analysis, research.
 
 Sau mỗi task, đánh giá trên tất cả các lớp đã gặp. Average incremental accuracy và final accuracy phải tuân theo định nghĩa và các bước được tính trong protocol đã chốt.
 Experiment	Script/notebook	Config	W&B run	Điều run cho thấy
-Smoke test	TODO	TODO	TODO	Kiểm tra pipeline; không dùng làm kết quả tái hiện
+Smoke backbone	src/scripts/run_experiment.py	configs/smoke.yaml	Log local; W&B chưa tích hợp	Kiểm tra data/backbone; không dùng làm kết quả tái hiện
 Tái hiện so sánh chính	TODO	TODO	TODO	Chưa chạy/xác nhận
 Tái hiện ablation	TODO	TODO	TODO	Chưa chạy/xác nhận
 Phân tích số mẫu	TODO	TODO	TODO	Chưa chạy/xác nhận
