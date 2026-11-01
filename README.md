@@ -75,21 +75,24 @@ Kích hoạt trên Windows PowerShell:
 .venv\Scripts\Activate.ps1
 Hoặc Linux/macOS:
 source .venv/bin/activate
-Sau khi nhóm điền dependencies đã kiểm chứng vào requirements.txt:
+Cài dependencies:
 python -m pip install -r requirements.txt
 Dữ liệu, checkpoint và lệnh thực nghiệm
-- Dữ liệu phải được tải và chuẩn bị bằng code từ nguồn Hugging Face/Kaggle phù hợp; ghi rõ nguồn, phiên bản và cách xử lý trong tài liệu protocol.
+- CIFAR-100 được tải từ Hugging Face theo revision cố định trong YAML và cache ở `data/hf-cache`.
 - Checkpoint dùng chung cần có URL tải, nguồn gốc, cấu hình huấn luyện và mã kiểm tra khi có. Không commit file trọng số vào Git.
 - Cache đặc trưng không được dùng để truy cập lại mẫu lớp cũ hoặc lớp tương lai trái với protocol exemplar-free đã chọn.
 - Không đưa token hoặc API key vào notebook, config hay repository.
-TODO: bổ sung lệnh thực tế sau khi entry point được triển khai và kiểm tra. Hiện README chưa cam kết có lệnh chạy end-to-end hoạt động.
-Tác vụ	Lệnh đã kiểm chứng
-Tải và chuẩn bị dữ liệu	TODO
-Chạy smoke test	TODO
-Huấn luyện backbone task đầu	TODO
-Tái hiện FeCAM và baseline	TODO
-Chạy phân tích/stress-test	TODO
-Tổng hợp bảng và vẽ hình	TODO
+Các lệnh chạy từ thư mục gốc (xem chi tiết protocol tại `docs/protocol.md`):
+
+```powershell
+python scripts/run_experiment.py --config configs/smoke.yaml --offline
+python scripts/run_experiment.py --config configs/smoke_fecam.yaml --offline
+python scripts/run_experiment.py --config configs/reproduction/cifar100_ncm.yaml --offline
+python scripts/run_experiment.py --config configs/reproduction/cifar100_fecam.yaml --offline
+```
+
+Hai smoke test dùng 1 epoch và 10 mẫu/lớp để kiểm tra NCM/FeCAM pipeline; không dùng làm kết quả tái hiện.
+Để log online, bỏ `--offline` sau khi đã đăng nhập W&B và tạo project public.
 
 
 7. Theo dõi và báo cáo thực nghiệm
@@ -97,7 +100,7 @@ Mỗi run ghi nhận: experiment ID, config, seed, class order, dataset/protocol
 
 W&B dùng các tag phân biệt: smoke-test, reproduction, analysis, research.
 
-Sau mỗi task, đánh giá trên tất cả các lớp đã gặp. Average incremental accuracy và final accuracy phải tuân theo định nghĩa và các bước được tính trong protocol đã chốt.
+Sau mỗi task, đánh giá riêng trên test set từng task đã gặp. Định nghĩa Average Incremental Accuracy, final accuracy và BWT nằm trong `docs/protocol.md`; FWT không log vì protocol không có baseline trước khi học trên lớp tương lai.
 Experiment	Script/notebook	Config	W&B run	Điều run cho thấy
 Smoke test	TODO	TODO	TODO	Kiểm tra pipeline; không dùng làm kết quả tái hiện
 Tái hiện so sánh chính	TODO	TODO	TODO	Chưa chạy/xác nhận

@@ -1,0 +1,32 @@
+experiment: reproduction
+protocol: cifar100-b50-i10-release-v1
+seed: 1
+cpu_threads: 4
+dataset:
+  name: uoft-cs/cifar100
+  revision: aadb3af77e9048adbea6b47c21a81e47dd092ae5
+  root: data
+split:
+  total_classes: 100
+  initial_classes: 50
+  increment: 10
+  class_order_seed: 1993
+backbone: resnet18-cifar-cosine
+training:
+  epochs: 200
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 0.0005
+loader:
+  batch_size: 128
+  num_workers: 0
+  train_samples_per_class: null
+  test_samples_per_class: null
+classifier:
+  name: fecam
+  per_class_covariance: true
+  full_covariance: true
+  tukey_beta: 0.5
+  shrinkage_gamma1: 1.0
+  shrinkage_gamma2: 1.0
+  correlation_normalization: true

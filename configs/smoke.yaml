@@ -1,0 +1,43 @@
+# Smoke test — kiểm tra pipeline trên 10 class, 1 epoch, CPU.
+# 5 class task đầu + 1 task tăng dần x 5 class = 2 sessions.
+# Dùng: python scripts/run_experiment.py --config configs/smoke.yaml --offline
+
+dataset: cifar100
+dataset_source: uoft-cs/cifar100
+dataset_revision: aadb3af77e9048adbea6b47c21a81e47dd092ae5
+data_root: data
+shuffle: true
+seed: [1993]
+training_seed: 1
+cpu_threads: 4
+total_classes: 10
+
+init_cls: 5
+increment: 5
+
+model_name: fecam
+convnet_type: resnet18
+
+ncm: true          # NCM mode cho smoke test (nhanh hơn)
+full_cov: false
+diagonal: false
+per_class: false
+shrink: false
+norm_cov: false
+tukey: false
+
+init_epochs: 1     # chỉ để kiểm tra pipeline, không dùng báo cáo kết quả
+init_lr: 0.1
+init_weight_decay: 0.0005
+batch_size: 128
+num_workers: 0
+train_samples_per_class: 10
+test_samples_per_class: 10
+
+memory_size: 0
+device: ["cpu"]
+T: 2
+beta: 0.5
+alpha1: 1
+alpha2: 1
+prefix: train
