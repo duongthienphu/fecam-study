@@ -50,13 +50,16 @@ protocol does not measure a pre-learning baseline on future tasks.
 From the repository root, after installing `requirements.txt`:
 
 ```powershell
-python scripts/run_experiment.py --config configs/smoke.yaml --offline
-python scripts/run_experiment.py --config configs/smoke_fecam.yaml --offline
-python scripts/run_experiment.py --config configs/reproduction/cifar100_ncm.yaml --offline
-python scripts/run_experiment.py --config configs/reproduction/cifar100_fecam.yaml --offline
+python scripts/run_experiment.py --config configs/smoke.yaml --device cpu
+python scripts/run_experiment.py --config configs/smoke_fecam.yaml --device cpu
 ```
 
-The smoke configs use 10 classes (5+5), 10 train/test examples per class and 1
-epoch to check the NCM and FeCAM paths; neither is a reproduction result. Full runs can be long on CPU. For cloud runs,
-remove `--offline` after creating a public W&B project and configuring the
-account credentials locally. Do not upload `.env` or API keys to GitHub.
+The smoke configs use 10 classes (5+5), 8 train and 4 test examples per class,
+and 1 epoch to check the NCM and FeCAM paths; neither is a reproduction result.
+This runner writes JSON summaries under `outputs/` and does not log to W&B.
+It reads a matching cached Hugging Face revision when available, otherwise it
+downloads that pinned revision. Do not upload `.env` or API keys to GitHub.
+
+To upload the completed smoke summaries to the public W&B project `fecam-study`,
+run `python scripts/upload_smoke_to_wandb.py` after setting `WANDB_API_KEY` in
+the ignored local `.env` file or the shell environment.

@@ -1,322 +1,202 @@
-"""
-run_experiment.py — Entry point chạy thực nghiệm FeCAM / NCM với W&B tracking
-==============================================================================
-Cách dùng:
+"""Run a short, task-incremental NCM or FeCAM evaluation from a YAML config."""
 
-  # Chạy FeCAM với W&B online:
-  python scripts/run_experiment.py --config configs/reproduction/cifar100_fecam.yaml
-
-  # Chạy NCM baseline, offline (không cần login W&B):
-  python scripts/run_experiment.py --config configs/reproduction/cifar100_ncm.yaml --offline
-
-  # Pipeline smoke test (10 classes, 1 epoch):
-  python scripts/run_experiment.py --config configs/smoke.yaml --offline
-"""
-
-import os
-import sys
-import json
-import yaml
 import argparse
+import json
+import platform
+import subprocess
+import sys
+from collections import Counter
+from datetime import datetime, timezone
+from importlib.metadata import version
+from pathlib import Path
+from time import perf_counter
 
-# ── Load .env nếu có (để dùng WANDB_API_KEY mà không cần wandb login) ──────
-_env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
-if os.path.exists(_env_path):
-    with open(_env_path) as _f:
-        for _line in _f:
-            _line = _line.strip()
-            if _line and not _line.startswith("#") and "=" in _line:
-                _k, _v = _line.split("=", 1)
-                os.environ.setdefault(_k.strip(), _v.strip())
-import logging
-import random
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
 import numpy as np
-import pandas as pd
 import torch
-from torch.utils.data import DataLoader, Subset
+import yaml
+from torch.utils.data import DataLoader
 
-# Đảm bảo import từ src/
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from utils.tracking import create_tracker, WandbTracker
-from evaluation.metrics import CLMetrics
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler()],
-)
-logger = logging.getLogger(__name__)
+from src.data.datasets import DATASET_ID, DATASET_REVISION, TaskDataset, load_cifar100
+from src.data.task_split import TaskSplit
+from src.engine.extract_features import extract_features
+from src.engine.train_base import train_base
+from src.evaluation.metrics import CLMetrics
+from src.models.backbone import Backbone
+from src.models.fecam import FeCAM
+from src.models.ncm import NCMClassifier
+from src.utils.seed import seed_everything, seed_worker
 
 
-# ---------------------------------------------------------------------------
-# Config loader (hỗ trợ cả YAML và JSON)
-# ---------------------------------------------------------------------------
-
-def load_config(path: str) -> dict:
-    with open(path, "r", encoding="utf-8") as f:
-        if path.endswith(".yaml") or path.endswith(".yml"):
-            raw = yaml.safe_load(f)
-        else:
-            raw = json.load(f)
-
-    # Normalize the documented experiment schema to the legacy FeCAM model args.
-    if isinstance(raw.get("dataset"), dict):
-        dataset = raw["dataset"]
-        split = raw["split"]
-        training = raw["training"]
-        loader = raw["loader"]
-        classifier = raw["classifier"]
-        is_ncm = classifier["name"].lower() == "ncm"
-        return {
-            **raw,
-            "dataset_name": dataset["name"],
-            "dataset_source": dataset["name"],
-            "dataset_revision": dataset.get("revision"),
-            "data_root": dataset.get("root", "data"),
-            "dataset": "cifar100",
-            "shuffle": True,
-            "seed": [split.get("class_order_seed", 1993)],
-            "training_seed": raw.get("seed", 1),
-            "cpu_threads": raw.get("cpu_threads", 4),
-            "total_classes": split.get("total_classes", 100),
-            "init_cls": split["initial_classes"],
-            "increment": split["increment"],
-            "model_name": "fecam",
-            "convnet_type": "resnet18",
-            "ncm": is_ncm,
-            "full_cov": bool(classifier.get("full_covariance", False)),
-            "diagonal": False,
-            "per_class": bool(classifier.get("per_class_covariance", False)),
-            "shrink": not is_ncm,
-            "norm_cov": bool(classifier.get("correlation_normalization", False)),
-            "tukey": classifier.get("tukey_beta") is not None,
-            "beta": classifier.get("tukey_beta") or 0.5,
-            "alpha1": classifier.get("shrinkage_gamma1", 1.0),
-            "alpha2": classifier.get("shrinkage_gamma2", 1.0),
-            "init_epochs": training["epochs"],
-            "init_lr": training["lr"],
-            "init_weight_decay": training["weight_decay"],
-            "momentum": training.get("momentum", 0.9),
-            "batch_size": loader["batch_size"],
-            "num_workers": loader.get("num_workers", 0),
-            "train_samples_per_class": loader.get("train_samples_per_class"),
-            "test_samples_per_class": loader.get("test_samples_per_class"),
-            "memory_size": 0,
-            "device": ["cpu"],
-            "T": 2,
-            "prefix": raw.get("experiment", "reproduction"),
-        }
-    return raw
+def load_config(path):
+    with Path(path).open(encoding='utf-8') as handle:
+        config = yaml.safe_load(handle)
+    required = ('experiment', 'protocol', 'seed', 'dataset', 'split', 'backbone',
+                'training', 'loader', 'classifier')
+    if not isinstance(config, dict) or any(key not in config for key in required):
+        raise ValueError(f'Config must include these fields: {required}')
+    if config['dataset'].get('name') != DATASET_ID or config['dataset'].get('revision') != DATASET_REVISION:
+        raise ValueError('Only the pinned uoft-cs/cifar100 revision is supported')
+    if config['backbone'] != 'resnet18-cifar-cosine':
+        raise ValueError('Unsupported backbone')
+    classifier = config['classifier']
+    if classifier.get('name') == 'ncm':
+        if classifier.get('metric', 'euclidean') not in ('euclidean', 'cosine'):
+            raise ValueError('NCM metric must be euclidean or cosine')
+        if classifier.get('normalize_features', True) != classifier.get('normalize_prototypes', True):
+            raise ValueError('NCM normalizes features and prototypes together')
+    elif classifier.get('name') == 'fecam':
+        if not classifier.get('per_class_covariance') or not classifier.get('full_covariance'):
+            raise ValueError('This FeCAM implementation requires per-class full covariance')
+        if not classifier.get('correlation_normalization'):
+            raise ValueError('This FeCAM implementation requires correlation normalization')
+        if classifier.get('tukey_beta') not in (None, 0.5):
+            raise ValueError('This implementation supports Tukey beta=0.5 or no transform')
+    else:
+        raise ValueError('classifier.name must be ncm or fecam')
+    TaskSplit(**config['split'])
+    loader = config['loader']
+    if loader.get('batch_size', 0) < 2 or loader.get('num_workers', -1) < 0:
+        raise ValueError('Require batch_size >= 2 and num_workers >= 0')
+    if config['experiment'] != 'smoke-test':
+        raise ValueError('This compact runner is intended for smoke-test configs only')
+    return config
 
 
-def seed_everything(seed: int, cpu_threads: int = 4) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.set_num_threads(max(1, int(cpu_threads)))
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+def make_loader(data, split, config, task, source, device, augment=False):
+    options = config['loader']
+    rows = data[source]
+    dataset = TaskDataset(
+        rows, rows['fine_label'], split, task, source, augment=augment,
+        samples_per_class=options[f'{source}_samples_per_class'],
+    )
+    return DataLoader(
+        dataset, batch_size=options['batch_size'], shuffle=augment,
+        num_workers=options['num_workers'], pin_memory=str(device).startswith('cuda'),
+        worker_init_fn=seed_worker,
+        generator=torch.Generator().manual_seed(config['seed']), drop_last=False,
+    )
 
 
-def accuracies_by_task(model, task_sizes, batch_size, num_workers):
-    """Evaluate the active classifier separately on each seen task's test data."""
-    test_dataset = model.test_loader.dataset
-    labels = np.asarray(test_dataset.labels)
-    result = []
-    start = 0
-    for size in task_sizes[: model._cur_task + 1]:
-        end = start + size
-        indices = np.flatnonzero((labels >= start) & (labels < end)).tolist()
-        task_loader = DataLoader(
-            Subset(test_dataset, indices), batch_size=batch_size,
-            shuffle=False, num_workers=num_workers,
-        )
-        y_pred, y_true = model._eval_maha(
-            task_loader, model._init_protos, model._protos
-        )
-        result.append(float(np.mean(y_pred[:, 0] == y_true) * 100.0))
-        start = end
-    return result
+def write_json(path, value):
+    with Path(path).open('x', encoding='utf-8') as handle:
+        json.dump(value, handle, indent=2, ensure_ascii=False, allow_nan=False)
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+def provenance():
+    result = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True, capture_output=True)
+    package_names = ('torch', 'torchvision', 'numpy', 'Pillow', 'datasets', 'PyYAML')
+    return {
+        'git_commit': result.stdout.strip() if result.returncode == 0 else None,
+        'python': platform.python_version(), 'platform': platform.platform(),
+        'packages': {name: version(name) for name in package_names},
+        'cuda_runtime': torch.version.cuda,
+    }
 
-def main():
-    parser = argparse.ArgumentParser(description="Chạy thực nghiệm FeCAM / NCM với W&B")
-    parser.add_argument("--config",  type=str, required=True,
-                        help="Đường dẫn tới file config (.yaml hoặc .json)")
-    parser.add_argument("--offline", action="store_true",
-                        help="Chạy W&B ở chế độ offline (không cần login)")
-    parser.add_argument("--run-name", type=str, default=None,
-                        help="Tên run trên W&B (ghi đè config)")
-    parser.add_argument("--tags",    type=str, nargs="*", default=None,
-                        help="Tags cho W&B run, cách nhau bằng dấu cách")
-    args = parser.parse_args()
 
-    # 1. Load config
-    if not os.path.exists(args.config):
-        raise FileNotFoundError(f"Không tìm thấy config: {args.config}")
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--config', required=True)
+    parser.add_argument('--output', help='New output directory; it cannot already exist')
+    parser.add_argument('--device', default='auto', help='auto, cpu, cuda or cuda:0')
+    args = parser.parse_args(argv)
     config = load_config(args.config)
-    seed_everything(
-        config.get("training_seed", config.get("seed", [1])[0]
-                   if isinstance(config.get("seed"), list)
-                   else config.get("seed", 1)),
-        config.get("cpu_threads", 4),
-    )
-    logger.info(f"✅ Đã nạp config: {args.config}")
-    logger.info(f"   Config: {config}")
-
-    # 2. Khởi tạo W&B tracker
-    model_name = config.get("model_name", "unknown")
-    classifier_name = "ncm" if config.get("ncm", False) else model_name
-    dataset    = config.get("dataset",    "unknown")
-    is_smoke = (
-        config.get("total_classes", 100) < 100
-        or config.get("init_epochs", 200) < 200
-        or config.get("train_samples_per_class") is not None
-        or config.get("test_samples_per_class") is not None
-    )
-    run_type = "smoke-test" if is_smoke else config.get("experiment", "reproduction")
-    config["run_type"] = run_type
-    config.setdefault("protocol_id", config.get("protocol", "cifar100-b50-i10-release-v1"))
-    run_name   = args.run_name or f"{run_type}-{classifier_name}-{dataset}"
-    tags       = args.tags or [classifier_name, dataset, run_type]
-
-    tracker = create_tracker(
-        config   = config,
-        project  = "fecam-study",           # Public project cho yêu cầu đồ án
-        run_name = run_name,
-        tags     = tags,
-        offline  = args.offline,
-    )
-    tracker.start()
-
-    # 3. Khởi tạo DataManager và Model theo code gốc FeCAM
-    #    Import lazy để tránh crash khi chạy unit test
+    split = TaskSplit(**config['split'])
+    device = ('cuda' if torch.cuda.is_available() else 'cpu') if args.device == 'auto' else args.device
+    if str(device).startswith('cuda') and not torch.cuda.is_available():
+        raise RuntimeError('CUDA requested but unavailable')
+    seed_everything(config['seed'])
+    torch.set_num_threads(min(4, torch.get_num_threads()))
+    started = datetime.now(timezone.utc)
+    output = Path(args.output) if args.output else ROOT / 'outputs' / f"smoke-{config['classifier']['name']}-{started:%Y%m%dT%H%M%SZ}"
+    if not output.is_absolute():
+        output = ROOT / output
+    output.mkdir(parents=True, exist_ok=False)
+    manifest = {
+        'action': 'evaluate', 'started_utc': started.isoformat(), 'status': 'running',
+        'config': config, 'class_order': split.class_order, 'tasks': split.tasks,
+        'label_map': split.label_map, 'device': device, 'provenance': provenance(),
+    }
     try:
-        from utils.data_manager import DataManager
-        from utils.factory import get_model
-
-        data_manager = DataManager(
-            dataset_name = config["dataset"],
-            shuffle      = config.get("shuffle", True),
-            seed         = config.get("seed", [1993])[0],
-            init_cls     = config.get("init_cls", 10),
-            increment    = config.get("increment", 10),
-            data_root    = config.get("data_root", "data"),
-            dataset_source = config.get("dataset_source"),
-            dataset_revision = config.get("dataset_revision"),
-            total_classes = config.get("total_classes"),
+        data_start = perf_counter()
+        data_root = Path(config['dataset'].get('root', 'data'))
+        if not data_root.is_absolute():
+            data_root = ROOT / data_root
+        data = load_cifar100(data_root)
+        manifest['data_seconds'] = perf_counter() - data_start
+        manifest['dataset_source_mode'] = (
+            'local-cifar100-python-pickle' if str(data['train']._fingerprint).startswith('cifar100-python-local')
+            else 'huggingface-pinned-revision'
         )
-        model = get_model(model_name, config)
-        n_tasks = data_manager.nb_tasks
-
-    except Exception as e:
-        logger.exception(f"❌ Không thể khởi tạo DataManager/Model: {e}")
-        logger.error("   Đảm bảo bạn đang chạy từ thư mục gốc của project.")
-        tracker.finish()
-        return
-
-    # 4. Khởi tạo CLMetrics
-    cl_metrics = CLMetrics(
-        n_tasks=n_tasks, task_sizes=data_manager._increments
-    )
-    csv_path   = "results/tables/experiments.csv"
-    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-
-    session_rows = []   # buffer cho W&B table
-
-    # 5. Vòng lặp qua các Tasks
-    for task_id in range(n_tasks):
-        logger.info(f"\n{'='*60}")
-        logger.info(f"  BẮT ĐẦU TASK {task_id}/{n_tasks - 1}")
-        logger.info(f"{'='*60}")
-
-        # ── Huấn luyện tăng dần ──────────────────────────────────────
-        model.incremental_train(data_manager)
-
-        # ── Đánh giá ─────────────────────────────────────────────────
-        cnn_accy, nme_accy, maha_accy = model.eval_task()
-
-        if config.get("ncm", False) and maha_accy is not None:
-            acc_t    = maha_accy["top1"]
-            acc_type = "Euclidean NCM"
-        elif maha_accy is not None:
-            acc_t    = maha_accy["top1"]
-            acc_type = "Mahalanobis (FeCAM)"
-        else:
-            acc_t    = cnn_accy["top1"]
-            acc_type = "CNN"
-        classifier_accy = maha_accy if maha_accy is not None else cnn_accy
-
-        # ── Cập nhật accuracy matrix bằng accuracy riêng từng task ────
-        accs_per_seen = accuracies_by_task(
-            model, data_manager._increments,
-            config["batch_size"], config["num_workers"],
-        )
-        cl_metrics.update(task_id, accs_per_seen)
-
-        # ── Tính metrics tạm thời ─────────────────────────────────────
-        partial = cl_metrics.compute()
-        avg_acc = partial["avg_acc"]
-        bwt     = partial["bwt"] if not (isinstance(partial["bwt"], float)
-                                         and np.isnan(partial["bwt"])) else None
-
-        # ── Log W&B ──────────────────────────────────────────────────
-        tracker.log_task(
-            task_id        = task_id,
-            acc            = acc_t,
-            avg_acc        = avg_acc,
-            bwt            = bwt,
-            n_classes_seen = model._total_classes,
-            extra          = {
-                "acc_type": acc_type,
-                "top5"    : classifier_accy.get("top5", None),
-            },
-        )
-
-        # ── Ghi CSV ──────────────────────────────────────────────────
-        row = {
-            "run_type"     : run_type,
-            "protocol"     : config["protocol_id"],
-            "seed"         : config.get("training_seed", config.get("seed", [1])[0]),
-            "class_order_seed": config.get("seed", [1993])[0],
-            "model"        : classifier_name,
-            "dataset"      : dataset,
-            "session"      : task_id,
-            "classes_seen" : model._total_classes,
-            "acc_all"      : acc_t,
-            "avg_acc"      : avg_acc,
-            "acc_type"     : acc_type,
+        manifest['dataset'] = {
+            name: {'samples': len(rows), 'fingerprint': rows._fingerprint}
+            for name, rows in data.items()
         }
-        session_rows.append(row)
-        df_row = pd.DataFrame([row])
-        if not os.path.exists(csv_path) or os.path.getsize(csv_path) == 0:
-            df_row.to_csv(csv_path, index=False)
+        model = Backbone(config['split']['initial_classes'])
+        base_loader = make_loader(data, split, config, 0, 'train', device, augment=True)
+        history = train_base(model, base_loader, device=device, **config['training'])
+        model.freeze()
+        manifest['base_training'] = history
+
+        classifier_cfg = config['classifier']
+        if classifier_cfg['name'] == 'ncm':
+            classifier = NCMClassifier(
+                metric=classifier_cfg.get('metric', 'euclidean'),
+                normalize=classifier_cfg.get('normalize_features', True),
+            )
+            update = lambda features, labels: classifier.update_prototypes(features.numpy(), labels.numpy())
+            predict = lambda features: classifier.predict(features.numpy())
         else:
-            df_row.to_csv(csv_path, mode="a", header=False, index=False)
+            beta = classifier_cfg.get('tukey_beta')
+            classifier = FeCAM(
+                transform='sqrt' if beta is not None else 'none',
+                gamma1=classifier_cfg.get('shrinkage_gamma1', 1.0),
+                gamma2=classifier_cfg.get('shrinkage_gamma2', 1.0), device='cpu',
+            )
+            update = classifier.update
+            predict = lambda features: classifier.predict(features).cpu().numpy()
 
-        model.after_task()
+        task_sizes = [len(task) for task in split.tasks]
+        metrics = CLMetrics(len(split.tasks), task_sizes=task_sizes)
+        sessions = []
+        for task_id in range(len(split.tasks)):
+            train_loader = make_loader(data, split, config, task_id, 'train', device)
+            train_features, train_labels = extract_features(model, train_loader, device)
+            update(train_features, train_labels)
+            task_accuracies = []
+            for eval_task in range(task_id + 1):
+                test_loader = make_loader(data, split, config, eval_task, 'test', device)
+                test_features, test_labels = extract_features(model, test_loader, device)
+                prediction = predict(test_features)
+                task_accuracies.append(float(np.mean(prediction == test_labels.numpy()) * 100))
+            metrics.update(task_id, task_accuracies)
+            session = {
+                'task': task_id, 'classes_seen': sum(task_sizes[:task_id + 1]),
+                'task_accuracies': task_accuracies,
+                'seen_accuracy': float(np.average(task_accuracies, weights=task_sizes[:task_id + 1])),
+            }
+            sessions.append(session)
+            print(json.dumps(session), flush=True)
 
-    # 6. Tổng kết
-    final_metrics = cl_metrics.compute()
-    tracker.log_summary(final_metrics)
+        final_metrics = metrics.compute()
+        final_metrics = {
+            key: (None if isinstance(value, (float, np.floating)) and not np.isfinite(value) else value)
+            for key, value in final_metrics.items()
+        }
+        matrix = metrics.get_acc_matrix()
+        manifest['evaluation'] = {
+            'classifier': classifier_cfg, 'sessions': sessions, 'metrics': final_metrics,
+            'accuracy_matrix': [[None if not np.isfinite(v) else float(v) for v in row] for row in matrix],
+        }
+        manifest['status'] = 'completed'
+        write_json(output / 'summary.json', manifest)
+        print(f'Completed smoke evaluation: {output}', flush=True)
+    except Exception as exc:
+        write_json(output / 'failure.json', {'type': type(exc).__name__, 'error': str(exc)})
+        raise
 
-    # Log acc matrix heatmap
-    tracker.log_acc_matrix(cl_metrics.get_acc_matrix())
 
-    # Log bảng chi tiết từng session
-    tracker.log_table(session_rows, table_name="session_results")
-
-    logger.info(f"\n📁 Kết quả đã lưu tại: {csv_path}")
-    if tracker.run_url:
-        logger.info(f"🔗 W&B run: {tracker.run_url}")
-
-    tracker.finish()
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

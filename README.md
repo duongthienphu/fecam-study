@@ -85,14 +85,17 @@ Dữ liệu, checkpoint và lệnh thực nghiệm
 Các lệnh chạy từ thư mục gốc (xem chi tiết protocol tại `docs/protocol.md`):
 
 ```powershell
-python scripts/run_experiment.py --config configs/smoke.yaml --offline
-python scripts/run_experiment.py --config configs/smoke_fecam.yaml --offline
-python scripts/run_experiment.py --config configs/reproduction/cifar100_ncm.yaml --offline
-python scripts/run_experiment.py --config configs/reproduction/cifar100_fecam.yaml --offline
+python scripts/run_experiment.py --config configs/smoke.yaml --device cpu
+python scripts/run_experiment.py --config configs/smoke_fecam.yaml --device cpu
 ```
 
-Hai smoke test dùng 1 epoch và 10 mẫu/lớp để kiểm tra NCM/FeCAM pipeline; không dùng làm kết quả tái hiện.
-Để log online, bỏ `--offline` sau khi đã đăng nhập W&B và tạo project public.
+Runner hiện chỉ chạy smoke test, ghi `summary.json` trong một thư mục mới dưới `outputs/` và chưa tích hợp W&B. Hai cấu hình dùng 1 epoch, 8 ảnh train/lớp và 4 ảnh test/lớp để kiểm tra pipeline; không dùng làm kết quả tái hiện. Kết quả mới nhất nằm trong `results/tables/smoke_20261102.csv`.
+
+Đẩy hai kết quả smoke mới nhất lên project W&B `fecam-study` (cần `WANDB_API_KEY` trong `.env` hoặc environment):
+
+```powershell
+python scripts/upload_smoke_to_wandb.py
+```
 
 
 7. Theo dõi và báo cáo thực nghiệm

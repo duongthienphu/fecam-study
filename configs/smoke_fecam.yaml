@@ -1,35 +1,31 @@
-# Pipeline check only: 10 classes, 10 samples/class, 1 epoch, CPU.
-dataset: cifar100
-dataset_source: uoft-cs/cifar100
-dataset_revision: aadb3af77e9048adbea6b47c21a81e47dd092ae5
-data_root: data
-shuffle: true
-seed: [1993]
-training_seed: 1
-cpu_threads: 4
-total_classes: 10
-init_cls: 5
-increment: 5
-model_name: fecam
-convnet_type: resnet18
-ncm: false
-full_cov: true
-diagonal: false
-per_class: true
-shrink: true
-norm_cov: true
-tukey: true
-init_epochs: 1
-init_lr: 0.1
-init_weight_decay: 0.0005
-batch_size: 128
-num_workers: 0
-train_samples_per_class: 10
-test_samples_per_class: 10
-memory_size: 0
-device: ["cpu"]
-T: 2
-beta: 0.5
-alpha1: 1
-alpha2: 1
-prefix: smoke-fecam
+experiment: smoke-test
+protocol: cifar100-smoke-b5-i5-v1
+seed: 1
+dataset:
+  name: uoft-cs/cifar100
+  revision: aadb3af77e9048adbea6b47c21a81e47dd092ae5
+  root: data
+split:
+  total_classes: 10
+  initial_classes: 5
+  increment: 5
+  class_order_seed: 1993
+backbone: resnet18-cifar-cosine
+training:
+  epochs: 1
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 0.0005
+loader:
+  batch_size: 16
+  num_workers: 0
+  train_samples_per_class: 8
+  test_samples_per_class: 4
+classifier:
+  name: fecam
+  per_class_covariance: true
+  full_covariance: true
+  tukey_beta: 0.5
+  shrinkage_gamma1: 1.0
+  shrinkage_gamma2: 1.0
+  correlation_normalization: true
