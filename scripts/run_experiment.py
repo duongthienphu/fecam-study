@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader
 from src.data.datasets import DATASET_ID, DATASET_REVISION, TaskDataset, load_cifar100
 from src.data.task_split import TaskSplit
 from src.engine.extract_features import extract_features
-from src.engine.train_base import train_base
+from src.engine.train_base import load_checkpoint, save_checkpoint, train_base
 from src.evaluation.metrics import CLMetrics
 from src.models.backbone import Backbone
 from src.models.fecam import FeCAM
@@ -60,16 +60,21 @@ def load_config(path):
     loader = config['loader']
     if loader.get('batch_size', 0) < 2 or loader.get('num_workers', -1) < 0:
         raise ValueError('Require batch_size >= 2 and num_workers >= 0')
-    if config['experiment'] != 'smoke-test':
-        raise ValueError('This compact runner is intended for smoke-test configs only')
+    if config['experiment'] == 'reproduction':
+        if (config['split']['total_classes'] != 100
+                or config['loader']['train_samples_per_class'] is not None
+                or config['loader']['test_samples_per_class'] is not None):
+            raise ValueError('Reproduction configs must use all classes and all samples')
+    elif config['experiment'] != 'smoke-test':
+        raise ValueError('Supported experiment values are smoke-test and reproduction')
     return config
 
 
-def make_loader(data, split, config, task, source, device, augment=False):
+def make_loader(data, split, config, task, source, device, augment=False, seen=False):
     options = config['loader']
     rows = data[source]
     dataset = TaskDataset(
-        rows, rows['fine_label'], split, task, source, augment=augment,
+        rows, rows['fine_label'], split, task, source, augment=augment, seen=seen,
         samples_per_class=options[f'{source}_samples_per_class'],
     )
     return DataLoader(
@@ -98,12 +103,19 @@ def provenance():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action', nargs='?', choices=('prepare', 'train-base', 'extract-features', 'evaluate'),
+                        default='evaluate')
     parser.add_argument('--config', required=True)
+    parser.add_argument('--checkpoint')
+    parser.add_argument('--task', type=int, default=0)
     parser.add_argument('--output', help='New output directory; it cannot already exist')
     parser.add_argument('--device', default='auto', help='auto, cpu, cuda or cuda:0')
     args = parser.parse_args(argv)
     config = load_config(args.config)
     split = TaskSplit(**config['split'])
+    split.classes(args.task)
+    if args.action == 'extract-features' and not args.checkpoint:
+        parser.error('extract-features requires --checkpoint')
     device = ('cuda' if torch.cuda.is_available() else 'cpu') if args.device == 'auto' else args.device
     if str(device).startswith('cuda') and not torch.cuda.is_available():
         raise RuntimeError('CUDA requested but unavailable')
@@ -115,7 +127,7 @@ def main(argv=None):
         output = ROOT / output
     output.mkdir(parents=True, exist_ok=False)
     manifest = {
-        'action': 'evaluate', 'started_utc': started.isoformat(), 'status': 'running',
+        'action': args.action, 'started_utc': started.isoformat(), 'status': 'running',
         'config': config, 'class_order': split.class_order, 'tasks': split.tasks,
         'label_map': split.label_map, 'device': device, 'provenance': provenance(),
     }
@@ -134,11 +146,56 @@ def main(argv=None):
             name: {'samples': len(rows), 'fingerprint': rows._fingerprint}
             for name, rows in data.items()
         }
-        model = Backbone(config['split']['initial_classes'])
-        base_loader = make_loader(data, split, config, 0, 'train', device, augment=True)
-        history = train_base(model, base_loader, device=device, **config['training'])
-        model.freeze()
-        manifest['base_training'] = history
+        manifest['task_counts'] = []
+        for task_id in range(len(split.tasks)):
+            train_task = make_loader(data, split, config, task_id, 'train', device)
+            test_seen = make_loader(data, split, config, task_id, 'test', device, seen=True)
+            manifest['task_counts'].append({
+                'task': task_id, 'train': len(train_task.dataset), 'test_seen': len(test_seen.dataset),
+                'train_per_class': dict(Counter(train_task.dataset.targets)),
+            })
+
+        if args.action == 'prepare':
+            manifest['status'] = 'completed'
+            write_json(output / 'summary.json', manifest)
+            print(f'Completed prepare: {output}', flush=True)
+            return
+        elif args.action == 'extract-features':
+            model, metadata = load_checkpoint(args.checkpoint, device)
+            for key in ('protocol', 'seed', 'dataset', 'split', 'backbone', 'training'):
+                if metadata['config'][key] != config[key]:
+                    raise ValueError(f'Checkpoint/config mismatch: {key}')
+            if metadata['class_order'] != split.class_order:
+                raise ValueError('Checkpoint class order mismatch')
+            manifest['checkpoint'] = str(Path(args.checkpoint).resolve())
+            manifest['features'] = {}
+            for source in ('train', 'test'):
+                loader = make_loader(
+                    data, split, config, args.task, source, device,
+                    seen=(source == 'test'),
+                )
+                vectors, labels = extract_features(model, loader, device)
+                manifest['features'][source] = {
+                    'shape': list(vectors.shape), 'labels': sorted(labels.unique().tolist()),
+                }
+            manifest['status'] = 'completed'
+            write_json(output / 'summary.json', manifest)
+            print(f'Completed extract-features: {output}', flush=True)
+            return
+        else:
+            model = Backbone(config['split']['initial_classes'])
+            base_loader = make_loader(data, split, config, 0, 'train', device, augment=True)
+            history = train_base(model, base_loader, device=device, **config['training'])
+            manifest['base_training'] = history
+            if args.action == 'train-base':
+                metadata = {'config': config, 'class_order': split.class_order,
+                            'provenance': manifest['provenance'], 'epochs_completed': len(history)}
+                save_checkpoint(output / 'base.pt', model, metadata)
+                manifest['status'] = 'completed'
+                write_json(output / 'summary.json', manifest)
+                print(f'Completed train-base: {output}', flush=True)
+                return
+            model.freeze()
 
         classifier_cfg = config['classifier']
         if classifier_cfg['name'] == 'ncm':

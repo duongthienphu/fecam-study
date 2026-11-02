@@ -20,6 +20,9 @@ class RunnerTests(unittest.TestCase):
         ncm = load_config(ROOT / 'configs/reproduction/cifar100_ncm.yaml')
         for key in ('seed', 'dataset', 'split', 'backbone', 'training', 'loader'):
             self.assertEqual(fecam[key], ncm[key])
+        self.assertEqual(fecam['training']['weight_decay'], 0.0001)
+        smoke = load_config(ROOT / 'configs/smoke.yaml')
+        self.assertEqual(smoke['training']['weight_decay'], 0.0001)
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'bad.yaml'
             fecam['loader']['train_samples_per_class'] = 1
@@ -35,7 +38,7 @@ class RunnerTests(unittest.TestCase):
         rows = Dataset.from_dict({'img': images, 'fine_label': labels}, features=Features({
             'img': Image(), 'fine_label': ClassLabel(names=[str(i) for i in range(100)])}))
         data = DatasetDict(train=rows, test=rows)
-        with tempfile.TemporaryDirectory() as folder, patch('src.scripts.run_experiment.load_cifar100', return_value=data):
+        with tempfile.TemporaryDirectory() as folder, patch('scripts.run_experiment.load_cifar100', return_value=data):
             base = Path(folder) / 'base'
             features = Path(folder) / 'features'
             config_path = str(ROOT / 'configs/smoke.yaml')

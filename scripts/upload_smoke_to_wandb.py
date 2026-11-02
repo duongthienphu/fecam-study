@@ -46,8 +46,8 @@ def main(argv=None):
     parser.add_argument('--entity', help='Defaults to the account linked to WANDB_API_KEY')
     parser.add_argument('--check-only', action='store_true', help='Check project access without creating runs')
     parser.add_argument('--summaries', nargs='+', default=[
-        'outputs/after-cleanup-smoke-ncm/summary.json',
-        'outputs/after-cleanup-smoke-fecam/summary.json',
+        'outputs/smoke-ncm-20261102-v3/summary.json',
+        'outputs/smoke-fecam-20261102-v3/summary.json',
     ])
     args = parser.parse_args(argv)
 

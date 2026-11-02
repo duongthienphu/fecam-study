@@ -1,7 +1,6 @@
 experiment: reproduction
-protocol: cifar100-b50-i10-release-v1
+protocol: cifar100-b50-i10-paper-wd-v2
 seed: 1
-cpu_threads: 4
 dataset:
   name: uoft-cs/cifar100
   revision: aadb3af77e9048adbea6b47c21a81e47dd092ae5
@@ -16,7 +15,7 @@ training:
   epochs: 200
   lr: 0.1
   momentum: 0.9
-  weight_decay: 0.0005
+  weight_decay: 0.0001
 loader:
   batch_size: 128
   num_workers: 0

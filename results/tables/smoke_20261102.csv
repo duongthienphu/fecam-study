@@ -1,3 +1,3 @@
-classifier,protocol,seed,class_order_seed,dataset_source,device,epochs,classes,train_samples_per_class,test_samples_per_class,session_accuracy_percent,avg_acc_percent,final_acc_percent,bwt_percent,fwt
-ncm,cifar100-smoke-b5-i5-v1,1,1993,huggingface-pinned-revision,cpu,1,10,8,4,"[50.0,17.5]",33.75,17.5,-25.0,not_measured
-fecam,cifar100-smoke-b5-i5-v1,1,1993,huggingface-pinned-revision,cpu,1,10,8,4,"[45.0,17.5]",31.25,17.5,-30.0,not_measured
+classifier,protocol,seed,class_order_seed,dataset_source,device,epochs,classes,train_samples_per_class,test_samples_per_class,weight_decay,session_accuracy_percent,avg_acc_percent,final_acc_percent,bwt_percent,fwt
+ncm,cifar100-smoke-b5-i5-v1,1,1993,huggingface-pinned-revision,cpu,1,10,8,4,0.0001,"[55.0,17.5]",36.25,17.5,-30.0,not_measured
+fecam,cifar100-smoke-b5-i5-v1,1,1993,huggingface-pinned-revision,cpu,1,10,8,4,0.0001,"[50.0,17.5]",33.75,17.5,-35.0,not_measured
