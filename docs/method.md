@@ -16,7 +16,7 @@ NCM Euclidean đại diện mỗi lớp bằng một điểm trung bình và đo
 
 **Pipeline bản per-class:**
 
-1. Nhi trích đặc trưng bằng backbone cố định.
+1. Khang trích đặc trưng bằng backbone cố định.
 2. Phú tính prototype từ đặc trưng gốc của từng lớp mới.
 3. Biến đổi đặc trưng bằng Tukey nếu protocol cho phép.
 4. Tính covariance của đặc trưng đã biến đổi.
@@ -30,12 +30,14 @@ Với đặc trưng gốc $h_i=\phi(x_i)$ và $n_y$ là số mẫu train thuộc
 
 $$\mu_y=\frac{1}{n_y}\sum_{i:y_i=y}h_i.$$
 
-Trong đó $\mu_y$ là trung bình lớp y. Prototype có $d$ phần tử, cùng chiều với đặc trưng.
+Trong đó $\mu_y$ là trung bình lớp $y$. Prototype có $d$ phần tử, cùng chiều với đặc trưng.
 ### 1.3. Tukey: biến đổi từng tọa độ đặc trưng
 
 Theo Eq. (9):
 
 $$\tilde{\phi}(x) = \begin{cases} \phi(x)^\lambda & \text{if } \lambda \neq 0 \\  \log(\phi(x)) & \text{if } \lambda = 0 \end{cases}$$
+
+Đặt $T$ là phép biến đổi được chọn theo protocol, với $\tilde\phi(x)=T(\phi(x))$. Khi bật Tukey, $T$ được định nghĩa bởi Eq. (9); khi tắt Tukey, $T(h)=h$.
 
 Phép toán thực hiện trên từng phần tử. Mục đích là giảm độ lệch phân phối, làm dữ liệu gần Gaussian hơn.
 
@@ -46,44 +48,47 @@ Phép toán thực hiện trên từng phần tử. Mục đích là giảm đ�
 
 ### 1.4. Covariance: độ phân tán và quan hệ giữa các chiều
 
-Đặt $z_i=\tilde{\phi}(x)$, $\bar z_y=\frac1{n_y}\sum_i z_i$. Quy ước cài đặt đề xuất là sample covariance với mẫu số $n_y-1$:
+Đặt $z_i=T(h_i)=\tilde\phi(x_i)$, $\bar z_y=\frac1{n_y}\sum_{i:y_i=y}z_i$. Quy ước cài đặt đề xuất là sample covariance với mẫu số $n_y-1$:
 
-$$S_y=\frac{1}{n_y-1}\sum_{i:y_i=y}(z_i-\bar z_y)(z_i-\bar z_y)^T.$$
+$$S_y=\frac{1}{n_y-1}\sum_{i:y_i=y}(z_i-\bar z_y)(z_i-\bar z_y)^\top.$$
 
 Đường chéo $S_y[j,j]$ là phương sai chiều $j$. Phần tử ngoài đường chéo cho biết hai chiều có xu hướng cùng tăng/giảm hay biến thiên ngược nhau. Ma trận có kích thước $d\times d$, đối xứng.
 
-Paper không chỉ rõ mẫu số của estimator trong các công thức đang dùng; `ddof=1` là quy ước của bản đặc tả, cần kiểm tra khi tái lập. Nếu $n_y\le d$, covariance thường suy biến vì rank không vượt quá $n_y-1$.
+Paper không chỉ rõ mẫu số của estimator trong các công thức đang dùng, `ddof=1` là quy ước của bản đặc tả, cần kiểm tra khi tái lập. 
+
+Nếu $n_y\le d$, covariance thường suy biến vì rank không vượt quá $n_y-1$.
 
 ### 1.5. Shrinkage: điều chỉnh covariance trước khi giải hệ
 
 Eq. (8):
 
-$$S_{y,s}=S_y+\gamma_1 V_1 I+\gamma_2 V_2(J-I),$$
+$$S_{y,s}=S_y+\gamma_1 V_{1,y} I+\gamma_2 V_{2,y}(J-I),$$
 
-$$V_1=\frac1d\sum_j S_y[j,j],\qquad V_2=\frac1{d(d-1)}\sum_{j\ne k}S_y[j,k].$$
+$$V_{1,y}=\frac1d\sum_j S_y[j,j],\qquad V_{2,y}=\frac1{d(d-1)}\sum_{j\ne k}S_y[j,k].$$
 
-$J$ là ma trận toàn số 1. Ký hiệu $(1-I)$ trong paper được viết thành $(J-I)$ để tránh hiểu nhầm trong code. $V_2$ ở đây là trung bình **có dấu**, với $d=1$, đặt $V_2=0$.
+$I\in\mathbb R^{d\times d}$ là ma trận đơn vị; $J\in\mathbb R^{d\times d}$ là ma trận toàn số 1. Các chỉ số $j,k$ chạy từ $1$ đến $d$. Ký hiệu $(1-I)$ trong paper được viết thành $(J-I)$ để tránh hiểu nhầm trong code. $V_{2,y}$ ở đây là trung bình **có dấu**, với $d=1$, đặt $V_{2,y}=0$.
 
 Thành phần đường chéo tăng mức regularization, thành phần ngoài đường chéo điều chỉnh tương quan. Đây là đúng dạng Eq. (8), không tự thay bằng một công thức shrinkage phổ biến khác.
 
-| Setting trong paper | $\gamma_1$ | $\gamma_2$ | Tukey |
-| --- | ---: | ---: | --- |
-| Many-shot, ResNet-18, CIFAR100/TinyImageNet/ImageNet-Subset | 1 | 1 | sqrt |
-| Few-shot CIL | 100 | 100 | Theo backbone/protocol |
-| Pretrained transformer, Split-CIFAR100/Core50 | 1 | 0 | Không |
-| Pretrained transformer, Split-ImageNet-R | 10 | 10 | Không |
+| Setting trong paper | $\gamma_1$ | $\gamma_2$ |
+| --- | ---: | ---: |
+| Many-shot trên CIFAR100/TinyImageNet/ImageNet-Subset | 1 | 1 |
+| Few-shot CIL | 100 | 100 |
+| Split-CIFAR100/Core50 | 1 | 0 |
+| Split-ImageNet-R | 10 | 10 |
 
-Nguồn: mục 4.1 và supplement mục 7. Không dùng cùng một bộ tham số cho mọi benchmark theo mặc định.
+**Tukey transformation:** Xét riêng theo đặc trưng của backbone. Với ResNet-18, đặc trưng không âm nhờ ReLU nên có thể áp dụng Tukey, phép biến đổi căn bậc hai tương ứng với $\lambda=0.5$. Với ViT pretrained trên ImageNet-21K, paper không áp dụng Tukey vì đặc trưng có thể âm.
 
-**Lưu ý số học:** công thức có thành phần ngoài đường chéo nên không bảo đảm dương xác định với mọi đầu vào/tham số tùy ý. Nếu covariance toàn 0 thì $V_1=V_2=0$, phép cộng trên cũng không sửa được suy biến. Vì vậy cần kiểm tra, không chỉ gọi inverse và hy vọng chạy được.
+**Nguồn:** mục 4.1 và supplement mục 7. Các giá trị $\gamma_1,\gamma_2$ trên được dùng cho những dataset/setting tương ứng, không phải quy tắc suy ra chỉ từ backbone.
+
+**Lưu ý số học:** công thức có thành phần ngoài đường chéo nên không bảo đảm dương xác định với mọi đầu vào/tham số tùy ý. Nếu covariance toàn 0 thì $V_{1,y}=V_{2,y}=0$, phép cộng trên cũng không sửa được suy biến. Vì vậy cần kiểm tra, không chỉ gọi inverse và hy vọng chạy được.
 
 ### 1.6. Correlation normalization: đưa đường chéo về 1
 
 Áp dụng Eq. (7) **sau shrinkage**:
 
 $$R_y[j,k]=\frac{S_{y,s}[j,k]}{\sqrt{S_{y,s}[j,j]}\sqrt{S_{y,s}[k,k]}}.$$
-
-Khi các phương sai dương, $R_y[j,j]=1$. Nhờ vậy, lớp mới có covariance lớn hơn không mặc nhiên được khoảng cách nhỏ chỉ vì độ lớn phương sai. Các tương quan ngoài đường chéo vẫn được giữ.
+Chuẩn hóa ma trận hiệp phương sai thành ma trận tương quan: đưa các phần tử đường chéo về 1, còn các phần tử ngoài đường chéo biểu diễn hệ số tương quan trong $[-1,1]$.
 
 Ví dụ $S_s=\begin{bmatrix}4&2\\2&9\end{bmatrix}$ cho $R=\begin{bmatrix}1&1/3\\1/3&1\end{bmatrix}$. Hai chiều có cùng phương sai chuẩn hóa bằng 1 nhưng vẫn có tương quan dương.
 
@@ -91,40 +96,32 @@ Ví dụ $S_s=\begin{bmatrix}4&2\\2&9\end{bmatrix}$ cho $R=\begin{bmatrix}1&1/3\
 
 ### 1.7. Score và dự đoán
 
-Với đặc trưng query $h$:
+Với ảnh query $x$, đặt $h=\phi(x)$ và $\tilde\mu_y=T(\mu_y)$. Lưu ý $\tilde\mu_y$ khác $\bar z_y$ nói chung: $T(\operatorname{mean}(h_i))\ne\operatorname{mean}(T(h_i))$.
 
-$$v_y=T(h)-\tilde\mu_y,\qquad D_y(h)=v_y^T R_y^{-1}v_y,\qquad\hat y=\arg\min_{y\in\mathcal C_t}D_y(h).$$
+$$v_y=T(h)-\tilde\mu_y,\qquad D_y(h)=v_y^\top R_y^{-1}v_y,\qquad\hat y=\arg\min_{y\in\mathcal C_t}D_y(h).$$
 
-Đây là **bình phương** khoảng cách Mahalanobis; không cần căn vì căn không thay đổi thứ tự. $R_y^{-1}$ đóng vai trò ma trận metric $M_y$.
+Đây là **bình phương** khoảng cách Mahalanobis, không cần căn vì căn không thay đổi thứ tự. Không có jitter, $R_y^{-1}$ đóng vai trò ma trận metric.
 
-Không cần tính inverse trực tiếp: nếu $R_y=L_yL_y^T$, giải $L_yu=v_y$, rồi $D_y=\|u\|_2^2$. Cách này triển khai cùng biểu thức bằng giải hệ tam giác.
+Để thống nhất với cài đặt có jitter ở §3.2, định nghĩa:
 
-Với metric chung, ranh giới so sánh hai prototype là tuyến tính; với metric riêng từng lớp, nói chung có các hạng bậc hai nên ranh giới có thể phi tuyến.
+$$A_y=R_y+\eta_y I=L_yL_y^\top,\qquad M_y=A_y^{-1},\qquad D_y(h)=v_y^\top M_yv_y=\|L_y^{-1}v_y\|_2^2.$$
 
-### 1.8. Hiểu đúng liên hệ với Bayes
+Ở đây $\eta_y$ là jitter thực dùng cho lớp $y$, $L_y$ là factor Cholesky tam giác dưới của $A_y$, không phải của $M_y$. Khi $\eta_y=0$, công thức trở về score dùng $R_y^{-1}$ ở trên.
 
-Eq. (3) thể hiện phần mũ của mật độ Gaussian, không phải xác suất hậu nghiệm đã chuẩn hóa của lớp. Gaussian đầy đủ còn có hệ số $(2\pi)^{-d/2}|S_y|^{-1/2}$.
-
-Với covariance Gaussian $S_y$ và prior $\pi_y$, quy tắc Bayes đầy đủ chọn giá trị nhỏ nhất của:
-
-$$D_y+\log|S_y|-2\log\pi_y.$$
-
-Chỉ bỏ prior khi prior bằng nhau; chỉ bỏ hạng determinant khi nó không đổi giữa các lớp. Dùng log giữ nguyên argmax vì log **đồng biến**, không phải vì log lõm. Bởi vậy, trong báo cáo nên mô tả FeCAM là classifier dùng metric Mahalanobis được paper xây dựng từ động cơ Gaussian/Bayes; không khẳng định score khoảng cách là Bayes tối ưu cho mọi phân phối.
-
-Để tái lập Eq. (10), bản đầu dùng score khoảng cách của FeCAM; không tự thêm log-determinant/prior vào baseline. Một phiên bản Gaussian đầy đủ phải đặt tên là biến thể riêng.
-
-### 1.9. Hai cách lưu covariance
+### 1.8. Hai cách lưu covariance
 
 | Biến thể | Thống kê lưu | Bộ nhớ thống kê theo bậc lớn |
 | --- | --- | --- |
 | Per-class, phạm vi bản đầu | Một prototype và metric mỗi lớp | $O(Cd+Cd^2)$ |
 | Common covariance | Prototype mỗi lớp và một covariance chung | $O(Cd+d^2)$ |
 
-Eq. (6) cập nhật covariance chung theo số lớp:
+Trong bảng bộ nhớ và các shape/pseudocode, $C=C_t$ là số lớp đã học tại thời điểm đang xét. Công thức toán học dùng task $t=1,\ldots,T_{\mathrm{sess}}$; nếu repo đánh số từ 0 thì `task_idx=t-1`.
+
+Eq. (6) cập nhật covariance chung theo số lớp, với $t\ge2$ và khởi tạo $S_{1:1}=S_1$:
 
 $$S_{1:t}=\frac{C_{t-1}}{C_t}S_{1:t-1}+\frac{K_t}{C_t}S_t,$$
 
-trong đó $K_t$ là số lớp mới và $C_t=C_{t-1}+K_t$. Đây không phải mặc nhiên là cập nhật theo số mẫu. Cần đối chiếu cách tác giả xây dựng $S_t$ (trung bình covariance từng lớp hay covariance gộp đặc trưng task); hai cách không tương đương vì covariance gộp có biến thiên giữa các tâm lớp. Bản đầu **chỉ triển khai per-class**, nên điểm này không chặn việc cài đặt.
+trong đó $S_t$ là covariance chung của task hiện tại, $S_{1:t}$ là covariance chung tích lũy, $K_t$ là số lớp mới và $C_t=C_{t-1}+K_t$. Quy ước $C_0=0$. Đây không phải mặc nhiên là cập nhật theo số mẫu. Cần đối chiếu cách tác giả xây dựng $S_t$ (trung bình covariance từng lớp hay covariance gộp đặc trưng task). Hai cách không tương đương vì covariance gộp có biến thiên giữa các tâm lớp. Bản đầu **chỉ triển khai per-class**, nên điểm này không chặn việc cài đặt.
 
 ## 2. Bảng ký hiệu và giao diện đề xuất
 
@@ -132,7 +129,11 @@ trong đó $K_t$ là số lớp mới và $C_t=C_{t-1}+K_t$. Đây không phải
 
 | Ký hiệu | Ý nghĩa | Shape/kiểu |
 | --- | --- | --- |
-| $t$ | Task/session hiện tại, repo đánh số từ 0 | int |
+| $t$, $T_{\mathrm{sess}}$ | Chỉ số task trong toán học từ 1 và tổng số session (`num_sessions`); `task_idx=t-1` nếu code đánh số từ 0 | int |
+| $C$ | Viết gọn cho $C_t$ trong bộ nhớ, shape và pseudocode | int |
+| $d$, $N$ | Số chiều feature và số mẫu train trong một lần `update` | int |
+| $i$, $j$, $k$ | Chỉ số mẫu và hai chỉ số chiều feature ($1\le j,k\le d$) | int |
+| $y$, $\hat y$ | ID lớp đang xét và ID lớp dự đoán | scalar |
 | $\mathcal C_t$, $C_t$ | Tập lớp đã học và số lớp đã học | set, int |
 | $K_t$ | Số lớp mới ở task hiện tại | int |
 | $x_i$ | Ảnh đầu vào | Do pipeline quy định |
@@ -142,16 +143,25 @@ trong đó $K_t$ là số lớp mới và $C_t=C_{t-1}+K_t$. Đây không phải
 | $y_i$, `labels` | Nhãn toàn cục của mẫu | scalar, `[N]` |
 | $n_y$ | Số mẫu train của lớp $y$ | int |
 | $\mu_y$ | Trung bình đặc trưng gốc | `[d]` |
-| $z_i$, $\bar z_y$ | Đặc trưng đã Tukey và trung bình của chúng | `[d]` |
+| $T$, $\lambda$ | Phép biến đổi feature theo protocol và số mũ Tukey khi bật biến đổi | function, scalar |
+| $\tilde\phi(x)=T(\phi(x))$ | Backbone kết hợp phép biến đổi feature | `[d]` |
+| $z_i=T(h_i)$, $\bar z_y$ | Feature sau biến đổi và trung bình của chúng trong lớp $y$ | `[d]` |
 | $\tilde\mu_y$ | Prototype dùng khi chấm điểm: $T(\mu_y)$ | `[d]` |
-| $S_y$, $S_{y,s}$, $R_y$ | Covariance gốc, sau shrinkage, sau correlation normalization | `[d, d]` |
-| $L_y$ | Cholesky factor của metric covariance đã ổn định | `[d, d]` |
+| $S_y$, $S_{y,s}$, $R_y$ | Covariance của feature sau biến đổi (trước shrinkage), sau shrinkage, sau correlation normalization | `[d, d]` |
+| $S_t$, $S_{1:t}$ | Covariance chung của task $t$ và covariance chung tích lũy đến task $t$ | `[d, d]` |
+| $I$, $J$ | Ma trận đơn vị và ma trận toàn số 1 | `[d, d]` |
+| $V_{1,y}$, $V_{2,y}$ | Trung bình đường chéo và ngoài đường chéo của $S_y$ | scalar |
+| $\gamma_1$, $\gamma_2$ | Hệ số shrinkage | scalar |
+| $\eta_y$ | Jitter thực dùng cho lớp $y$, lưu trong `jitter_used` | scalar |
+| $A_y$, $M_y$ | Ma trận sau jitter $A_y=R_y+\eta_yI$ và metric $M_y=A_y^{-1}$ | `[d, d]` |
+| $L_y$ | Factor Cholesky tam giác dưới: $L_yL_y^\top=A_y$ | `[d, d]` |
+| $v_y$, $D_y(h)$ | Độ lệch $T(h)-\tilde\mu_y$ và bình phương khoảng cách đến lớp $y$ | `[d]`, scalar |
 | $B$ | Số query trong một batch dự đoán | int |
-| $D$ | Ma trận bình phương khoảng cách, càng nhỏ càng tốt | `[B, C_t]` |
+| $D$ | Ma trận bình phương khoảng cách; cột ứng với `class_ids`, càng nhỏ càng tốt | `[B, C]` |
 
-Paper dùng $D$ cho chiều đặc trưng và $Y$ trong một số công thức cho số lớp; repo dùng `d` và `C` để tránh nhầm nhãn với số lớp. Trong công thức Gaussian của paper, $x$ còn được dùng cho feature; tài liệu này dùng $h$ để phân biệt với ảnh.
+Paper dùng $D$ cho chiều đặc trưng và $Y$ trong một số công thức cho số lớp; repo dùng `d` và `C` để tránh nhầm nhãn với số lớp. Trong công thức Gaussian của paper, $x$ còn được dùng cho feature, tài liệu này dùng $h$ để phân biệt với ảnh.
 
-### 2.2. Hợp đồng với TV2: đầu vào
+### 2.2. Khang: đầu vào
 
 ```python
 update(features: Tensor[N, d], labels: LongTensor[N]) -> None
@@ -167,7 +177,7 @@ update(features: Tensor[N, d], labels: LongTensor[N]) -> None
 
 **Ánh xạ nhãn:** TV2 quản lý `original_dataset_id -> global_id` trong metadata. Classifier quản lý `global_id -> column_index`. Ví dụ task đầu có global ID `[42, 7]`, sắp lớp mới tăng dần thành `[7, 42]`; task sau thêm `19` thì `class_ids=[7,42,19]`. Cột 2 của score ứng với nhãn 19, không phải nhãn 2. Giữ nguyên vị trí lớp cũ.
 
-### 2.3. Hợp đồng với TV3: đầu ra
+### 2.3. Nhi: đầu ra
 
 ```python
 distances(features: Tensor[B, d]) -> Tensor[B, C]
@@ -217,8 +227,10 @@ Không bắt buộc lưu đồng thời covariance, inverse và factor. Bản đ
 
 ### 3.2. Hàm hỗ trợ ổn định số học
 
+Trong hàm xử lý một lớp, các biến cục bộ `S`, `V1`, `V2`, `S_shrunk`, `R`, `L`, `eta` lần lượt ứng với $S_y,V_{1,y},V_{2,y},S_{y,s},R_y,L_y,\eta_y$. `transform` trong pseudocode chính là $T$. Các ví dụ tính tay cũng lược chỉ số lớp khi không gây nhầm lẫn.
+
 ```text
-build_factor(S, gamma1, gamma2):
+build_factor(S, gamma1, gamma2, class_id):
     S = (S + transpose(S)) / 2
     V1 = mean(diagonal(S))
     V2 = mean(off_diagonal_entries(S)) if d > 1 else 0
@@ -254,8 +266,8 @@ update(H, labels):
         score_mu = transform(mu)
         centered = Z_y - mean(Z_y, axis=0)
         S = transpose(centered) @ centered / (number_of_rows(H_y) - 1)
-        L, eta = build_factor(S, gamma1, gamma2)
-        append (class_id, mu, score_mu, L, sample_count, eta) to temporary_state
+        L, eta = build_factor(S, gamma1, gamma2, class_id)
+        append (class_id, mu, score_mu, L, number_of_rows(H_y), eta) to temporary_state
 
     append temporary_state to persistent state only after all classes succeed
     discard per-sample features and temporary covariance matrices
