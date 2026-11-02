@@ -20,6 +20,9 @@ class RunnerTests(unittest.TestCase):
         ncm = load_config(ROOT / 'configs/reproduction/cifar100_ncm.yaml')
         for key in ('seed', 'dataset', 'split', 'backbone', 'training', 'loader'):
             self.assertEqual(fecam[key], ncm[key])
+        self.assertEqual(fecam['training']['weight_decay'], 0.0001)
+        smoke = load_config(ROOT / 'configs/smoke.yaml')
+        self.assertEqual(smoke['training']['weight_decay'], 0.0001)
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'bad.yaml'
             fecam['loader']['train_samples_per_class'] = 1

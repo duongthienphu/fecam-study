@@ -1,6 +1,6 @@
 # Protocol CIFAR-100 — dữ liệu và backbone
 
-Đã chốt ngày 01/11/2026 trên `feat/data-backbone`. ID: `cifar100-b50-i10-release-v1`.
+Đã chốt ngày 01/11/2026, cập nhật weight decay theo paper ngày 02/11/2026 trên `feat/data-backbone`. ID hiện tại: `cifar100-b50-i10-paper-wd-v2`.
 Phạm vi implementation hiện tại: tải dữ liệu, chia task, train task đầu, checkpoint và feature. Chưa có kết quả accuracy tái hiện.
 
 ## Setting và số liệu đối chiếu
@@ -46,7 +46,7 @@ Smoke dùng **10 lớp đầu của cùng permutation 100 lớp**, B=5, incremen
 | Feature | Adaptive average pooling cuối mạng, flatten thành `[N,512]`; sau ReLU, không âm |
 | Khởi tạo | Random; không nạp pretrained ImageNet |
 | Head task đầu | Cosine giữa feature và weight chuẩn hóa L2; scale trainable khởi tạo 1, không bias |
-| Loss/optimizer | Cross entropy; SGD lr=0.1, momentum=0.9, weight decay=0.0005 |
+| Loss/optimizer | Cross entropy; SGD lr=0.1, momentum=0.9, weight decay=0.0001 |
 | Schedule | CosineAnnealingLR, T_max=200, eta_min=0; step sau mỗi epoch |
 | Thời lượng | 200 epoch task đầu; batch 128; FP32 |
 | Loader | Shuffle train, không shuffle extraction/test; không drop batch cuối; mặc định workers=0 cho Windows |
@@ -56,7 +56,7 @@ Smoke dùng **10 lớp đầu của cùng permutation 100 lớp**, B=5, incremen
 | Chọn checkpoint | Trọng số sau epoch cuối cố định; không chọn bằng test accuracy |
 | Incremental | `freeze()` toàn bộ tham số; BatchNorm giữ eval kể cả khi caller gọi train() |
 
-Weight decay được chọn theo config tác giả (`5e-4`), **khác paper §4.1 (`1e-4`)**. Đây là quyết định có ghi nhận, không phải hai cấu hình tương đương. Nếu thử `1e-4`, tạo config/protocol ID và checkpoint riêng.
+Weight decay của cả hai cấu hình tái hiện và cấu hình smoke là `1e-4`, khớp paper §4.1. Khi thay đổi cấu hình training, cần huấn luyện lại để tạo checkpoint tương ứng; không dùng checkpoint của cấu hình khác. Outputs và checkpoint kiểm tra cục bộ đã được xóa. Các lựa chọn chưa được xác nhận từ paper chính như augmentation, cosine head và scheduler vẫn giữ nguyên.
 
 Implementation tái sử dụng [torchvision ResNet-18](https://docs.pytorch.org/vision/0.22/models/generated/torchvision.models.resnet18.html), thay stem/pooling và tự viết cosine head ngắn. [AutoAugment CIFAR10 của torchvision](https://docs.pytorch.org/vision/0.22/generated/torchvision.transforms.AutoAugment.html) thay cho custom `CIFAR10Policy` của tác giả; cách lấy mức biến đổi, RNG/fill có thể khác. Cùng với nguồn Hugging Face, thứ tự dữ liệu và phiên bản thư viện mới, đây là các sai khác phải báo cáo khi đối chiếu accuracy. Chưa cam kết tái hiện từng bit hoặc khớp chính xác số paper.
 
