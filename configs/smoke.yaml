@@ -1,5 +1,5 @@
 experiment: smoke-test
-protocol: cifar100-debug-b5-i5
+protocol: cifar100-smoke-b5-i5-v1
 seed: 1
 dataset:
   name: uoft-cs/cifar100
@@ -22,4 +22,7 @@ loader:
   train_samples_per_class: 8
   test_samples_per_class: 4
 classifier:
-  name: pending
+  name: ncm
+  metric: euclidean
+  normalize_features: true
+  normalize_prototypes: true

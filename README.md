@@ -78,7 +78,7 @@ source .venv/bin/activate
 Dependencies data/backbone đã được ghi trong requirements.txt; cài PyTorch phù hợp CPU/CUDA theo [hướng dẫn pipeline](docs/data-backbone.md) trước, sau đó:
 python -m pip install -r requirements.txt
 Dữ liệu, checkpoint và lệnh thực nghiệm
-- Dữ liệu phải được tải và chuẩn bị bằng code từ nguồn Hugging Face/Kaggle phù hợp; ghi rõ nguồn, phiên bản và cách xử lý trong tài liệu protocol.
+- CIFAR-100 được tải từ Hugging Face theo revision cố định trong YAML và cache ở `data/hf-cache`.
 - Checkpoint dùng chung cần có URL tải, nguồn gốc, cấu hình huấn luyện và mã kiểm tra khi có. Không commit file trọng số vào Git.
 - Cache đặc trưng không được dùng để truy cập lại mẫu lớp cũ hoặc lớp tương lai trái với protocol exemplar-free đã chọn.
 - Không đưa token hoặc API key vào notebook, config hay repository.
@@ -97,7 +97,7 @@ Mỗi run ghi nhận: experiment ID, config, seed, class order, dataset/protocol
 
 W&B dùng các tag phân biệt: smoke-test, reproduction, analysis, research.
 
-Sau mỗi task, đánh giá trên tất cả các lớp đã gặp. Average incremental accuracy và final accuracy phải tuân theo định nghĩa và các bước được tính trong protocol đã chốt.
+Sau mỗi task, đánh giá riêng trên test set từng task đã gặp. Định nghĩa Average Incremental Accuracy, final accuracy và BWT nằm trong `docs/protocol.md`; FWT không log vì protocol không có baseline trước khi học trên lớp tương lai.
 Experiment	Script/notebook	Config	W&B run	Điều run cho thấy
 Smoke backbone	src/scripts/run_experiment.py	configs/smoke.yaml	Log local; W&B chưa tích hợp	Kiểm tra data/backbone; không dùng làm kết quả tái hiện
 Tái hiện so sánh chính	TODO	TODO	TODO	Chưa chạy/xác nhận
@@ -154,3 +154,4 @@ Phú dự kiến dẫn dắt phương pháp và bản thảo; TV2 phụ trách b
   booktitle={Advances in Neural Information Processing Systems},
   year={2023}
 }
+

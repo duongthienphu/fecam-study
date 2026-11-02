@@ -11,7 +11,7 @@ from datasets import ClassLabel, Dataset, DatasetDict, Features, Image
 from PIL import Image as PILImage
 
 from src.data.task_split import TaskSplit
-from src.scripts.run_experiment import ROOT, load_config, main
+from scripts.run_experiment import ROOT, load_config, main
 
 
 class RunnerTests(unittest.TestCase):
@@ -38,7 +38,7 @@ class RunnerTests(unittest.TestCase):
         rows = Dataset.from_dict({'img': images, 'fine_label': labels}, features=Features({
             'img': Image(), 'fine_label': ClassLabel(names=[str(i) for i in range(100)])}))
         data = DatasetDict(train=rows, test=rows)
-        with tempfile.TemporaryDirectory() as folder, patch('src.scripts.run_experiment.load_cifar100', return_value=data):
+        with tempfile.TemporaryDirectory() as folder, patch('scripts.run_experiment.load_cifar100', return_value=data):
             base = Path(folder) / 'base'
             features = Path(folder) / 'features'
             config_path = str(ROOT / 'configs/smoke.yaml')
