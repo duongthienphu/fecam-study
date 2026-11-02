@@ -1,0 +1,25 @@
+experiment: smoke-test
+protocol: cifar100-debug-b5-i5
+seed: 1
+dataset:
+  name: uoft-cs/cifar100
+  revision: aadb3af77e9048adbea6b47c21a81e47dd092ae5
+  root: data
+split:
+  total_classes: 10
+  initial_classes: 5
+  increment: 5
+  class_order_seed: 1993
+backbone: resnet18-cifar-cosine
+training:
+  epochs: 1
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 0.0001
+loader:
+  batch_size: 16
+  num_workers: 0
+  train_samples_per_class: 8
+  test_samples_per_class: 4
+classifier:
+  name: pending

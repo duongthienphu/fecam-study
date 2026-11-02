@@ -1,0 +1,78 @@
+# Protocol CIFAR-100 — dữ liệu và backbone
+
+Đã chốt ngày 01/11/2026, cập nhật weight decay theo paper ngày 02/11/2026 trên `feat/data-backbone`. ID hiện tại: `cifar100-b50-i10-paper-wd-v2`.
+Phạm vi implementation hiện tại: tải dữ liệu, chia task, train task đầu, checkpoint và feature. Chưa có kết quả accuracy tái hiện.
+
+## Setting và số liệu đối chiếu
+
+Chọn many-shot exemplar-free class-incremental learning, CIFAR-100 **B=50, increment=10**: một task đầu và năm incremental task, tổng cộng sáu lần đánh giá. T=5 trong bảng paper chỉ số incremental task; không hiểu thành tổng năm task. Backbone chỉ học task đầu; sau đó đóng băng. Đánh giá không cung cấp task ID.
+
+Mục tiêu so sánh sau khi tích hợp classifier: Table 1, cột CIFAR-100 T=5; ablation tiếp theo: Table 4, cùng setting. Mốc paper: FeCAM per-class covariance Avg=70.9%, Last=62.1%; Euclidean-NCM Avg=64.8%, Last=51.6%. NCM là đối chứng đơn giản; không thay thế toàn bộ baseline của Table 1. Nguồn: [paper, §4.1, Tables 1/4](https://papers.neurips.cc/paper_files/paper/2023/file/15294ba2dcfb4521274f7aa1c26f4dd4-Paper-Conference.pdf).
+
+Average incremental accuracy là trung bình top-1 accuracy trên tất cả lớp đã thấy sau **cả sáu task, gồm task đầu**; final accuracy là accuracy sau task cuối. Không lấy trung bình accuracy từng lớp/task con thay cho accuracy trên toàn bộ test seen-classes. Nguồn: [supplement §2](https://papers.nips.cc/paper_files/paper/2023/file/15294ba2dcfb4521274f7aa1c26f4dd4-Supplemental-Conference.pdf).
+
+## Nguồn xác minh
+
+Code tác giả chỉ được đọc để đối chiếu cấu hình/kiến trúc; không đưa file implementation của tác giả vào repo. Các liên kết dưới cố định commit `e33f39d112ff2d2a2df2e68c490af579a50edd31`:
+
+- [Config CIFAR-100](https://github.com/dipamgoswami/FeCAM/blob/e33f39d112ff2d2a2df2e68c490af579a50edd31/exps/FeCAM_cifar100.json): lịch task, optimizer settings và tham số classifier.
+- [Data manager](https://github.com/dipamgoswami/FeCAM/blob/e33f39d112ff2d2a2df2e68c490af579a50edd31/utils/data_manager.py): permutation lớp và ánh xạ nhãn.
+- [Data transforms](https://github.com/dipamgoswami/FeCAM/blob/e33f39d112ff2d2a2df2e68c490af579a50edd31/utils/data.py), [setup training](https://github.com/dipamgoswami/FeCAM/blob/e33f39d112ff2d2a2df2e68c490af579a50edd31/models/fecam.py), [trainer](https://github.com/dipamgoswami/FeCAM/blob/e33f39d112ff2d2a2df2e68c490af579a50edd31/trainer.py): augmentation, cosine schedule, momentum và training seed.
+- [ResNet](https://github.com/dipamgoswami/FeCAM/blob/e33f39d112ff2d2a2df2e68c490af579a50edd31/convs/resnet.py), [network/head](https://github.com/dipamgoswami/FeCAM/blob/e33f39d112ff2d2a2df2e68c490af579a50edd31/utils/inc_net.py): CIFAR stem và cosine head khi train task đầu.
+
+## Dữ liệu và chia task
+
+| Mục | Quyết định |
+|---|---|
+| Nguồn | [uoft-cs/cifar100 trên Hugging Face](https://huggingface.co/datasets/uoft-cs/cifar100), revision `aadb3af77e9048adbea6b47c21a81e47dd092ae5` |
+| Split/label | Giữ split gốc; chỉ dùng `fine_label`, bỏ `coarse_label` |
+| Kiểm tra | Train 50,000 ảnh, test 10,000 ảnh; 100 lớp với 500 train/100 test mỗi lớp; ảnh RGB 32×32 |
+| Class order | `numpy.random.RandomState(1993).permutation(100)`, dùng MT19937 legacy; không dùng `default_rng` |
+| Nhãn | Nhãn liên tục là vị trí trong class order; lưu order, mapping và lịch task trong manifest |
+| Train task t | Chỉ lớp mới của task t; không cung cấp tùy chọn seen-train/replay |
+| Test task t | Toàn bộ test của lớp đã thấy từ task 0 đến t |
+| Dữ liệu cục bộ | Prepared Arrow cache dưới `data/huggingface/`, được Git ignore; Hub có thể lưu thêm metadata/source cache trong thư mục người dùng; revision và fingerprint ghi trong summary |
+
+Class-order seed `1993` và training seed `1` là hai giá trị riêng. Config hiện tại tái lập setting phát hành một order/một training seed. Nếu khảo sát thêm seed, giữ nguyên recipe và ghi cả hai seed; không tự gọi một run là kết quả nhiều seed.
+
+Smoke dùng **10 lớp đầu của cùng permutation 100 lớp**, B=5, increment=5; lấy 8 train và 4 test mẫu đầu theo thứ tự nguồn cho mỗi lớp; 1 epoch, batch 16. Giới hạn này có chủ đích để kiểm tra đường dữ liệu và không thuộc kết quả tái hiện.
+
+## Backbone và training đã chốt
+
+| Mục | Quyết định |
+|---|---|
+| Kiến trúc | ResNet-18, blocks [2,2,2,2], widths [64,128,256,512] |
+| Stem CIFAR | Conv 3×3, stride 1, padding 1, BatchNorm + ReLU; bỏ maxpool đầu |
+| Feature | Adaptive average pooling cuối mạng, flatten thành `[N,512]`; sau ReLU, không âm |
+| Khởi tạo | Random; không nạp pretrained ImageNet |
+| Head task đầu | Cosine giữa feature và weight chuẩn hóa L2; scale trainable khởi tạo 1, không bias |
+| Loss/optimizer | Cross entropy; SGD lr=0.1, momentum=0.9, weight decay=0.0001 |
+| Schedule | CosineAnnealingLR, T_max=200, eta_min=0; step sau mỗi epoch |
+| Thời lượng | 200 epoch task đầu; batch 128; FP32 |
+| Loader | Shuffle train, không shuffle extraction/test; không drop batch cuối; mặc định workers=0 cho Windows |
+| Train transforms | RandomCrop(32,padding=4) → HorizontalFlip(p=0.5) → ColorJitter(brightness=63/255) → torchvision AutoAugment(CIFAR10) → ToTensor → Normalize |
+| Eval/extract | ToTensor → Normalize, không resize, không augmentation |
+| Normalize | mean=(0.5071,0.4867,0.4408), std=(0.2675,0.2565,0.2761) |
+| Chọn checkpoint | Trọng số sau epoch cuối cố định; không chọn bằng test accuracy |
+| Incremental | `freeze()` toàn bộ tham số; BatchNorm giữ eval kể cả khi caller gọi train() |
+
+Weight decay của cả hai cấu hình tái hiện và cấu hình smoke là `1e-4`, khớp paper §4.1. Khi thay đổi cấu hình training, cần huấn luyện lại để tạo checkpoint tương ứng; không dùng checkpoint của cấu hình khác. Outputs và checkpoint kiểm tra cục bộ đã được xóa. Các lựa chọn chưa được xác nhận từ paper chính như augmentation, cosine head và scheduler vẫn giữ nguyên.
+
+Implementation tái sử dụng [torchvision ResNet-18](https://docs.pytorch.org/vision/0.22/models/generated/torchvision.models.resnet18.html), thay stem/pooling và tự viết cosine head ngắn. [AutoAugment CIFAR10 của torchvision](https://docs.pytorch.org/vision/0.22/generated/torchvision.transforms.AutoAugment.html) thay cho custom `CIFAR10Policy` của tác giả; cách lấy mức biến đổi, RNG/fill có thể khác. Cùng với nguồn Hugging Face, thứ tự dữ liệu và phiên bản thư viện mới, đây là các sai khác phải báo cáo khi đối chiếu accuracy. Chưa cam kết tái hiện từng bit hoặc khớp chính xác số paper.
+
+## Giao diện bàn giao classifier
+
+- `TaskSplit.classes(task, seen=False)` trả nhãn đã remap của lớp mới; `seen=True` trả tất cả lớp đã thấy.
+- `TaskDataset(..., source='train', seen=False, augment=False)` dùng trích xuất feature train task hiện tại; `source='test', seen=True` dùng đánh giá seen-classes. DataLoader trả `(images, labels)`.
+- `Backbone.extract_features(images)` trả **raw features**, chưa Tukey/chưa L2 normalize. `extract_features(model, loader, device)` trả tensor CPU `(features[N,512], labels[N])` đúng thứ tự loader, không gradient.
+- FeCAM sẽ thực hiện Tukey beta=0.5, covariance đầy đủ theo lớp, shrinkage gamma1=gamma2=1 và correlation normalization. NCM dùng khoảng cách Euclidean trên feature/prototype chuẩn hóa, không Tukey. Tham số được ghi sẵn trong config nhưng runner hiện **chưa chạy classifier**.
+- NCM/FeCAM dùng cùng checkpoint task đầu. Tính prototype/covariance từ train task hiện tại, giữ thống kê cần thiết; không lưu ảnh/feature mẫu cũ cho task sau. Runner chỉ lưu summary feature, không dump feature train ra đĩa.
+- Checkpoint gồm weights, số lớp head và metadata plain gồm config/order/seed/phiên bản/hash code; nạp với `weights_only=True`, kiểm tra config/order trước extract. Không tương thích trực tiếp checkpoint của tác giả do tên module khác.
+
+## Truy vết và giới hạn vận hành
+
+Mỗi lệnh tạo thư mục output mới, không ghi đè: `manifest.json`, `summary.json` hoặc `failure.json`. Train thêm `epochs.jsonl` và `base.pt`. Lưu dataset fingerprint, Git commit/trạng thái chưa commit, hash source, phiên bản package, thiết bị, thời gian epoch/extraction và đỉnh VRAM khi dùng CUDA. Manifest có task counts để kiểm tra rò rỉ lớp.
+
+Checkpoint hiện lưu sau khi train xong task đầu và hỗ trợ **nạp để extraction**, chưa lưu optimizer/RNG để tiếp tục training giữa epoch. Trước run 200 epoch trên Colab/Kaggle dễ ngắt phiên, cần bổ sung resume theo epoch. W&B, NCM, FeCAM và full incremental runner là bước tích hợp tiếp theo; log local hiện tại không thay thế tracking công khai khi báo cáo số liệu.
+
+Không dùng test để chọn siêu tham số. Không suy ra ETA run chính từ smoke vài chục mẫu; cần pilot full dữ liệu task đầu và stage classifier trước khi bắt đầu tái hiện chính.
