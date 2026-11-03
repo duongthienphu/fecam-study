@@ -96,7 +96,7 @@ Ví dụ $S_s=\begin{bmatrix}4&2\\2&9\end{bmatrix}$ cho $R=\begin{bmatrix}1&1/3\
 
 ### 1.7. Score và dự đoán
 
-Với ảnh query $x$, đặt $h=\phi(x)$ và $\tilde\mu_y=T(\mu_y)$. Lưu ý $\tilde\mu_y$ khác $\bar z_y$ nói chung: $T(\operatorname{mean}(h_i))\ne\operatorname{mean}(T(h_i))$.
+Với ảnh query $x$, đặt $h=\phi(x)$ và $\tilde\mu_y=T(\mu_y)$. Lưu ý $\tilde\mu_y$ khác $\bar z_y$ nói chung: $T(\mathrm{mean}(h_i)) \ne \mathrm{mean}(T(h_i))$.
 
 $$v_y=T(h)-\tilde\mu_y,\qquad D_y(h)=v_y^\top R_y^{-1}v_y,\qquad\hat y=\arg\min_{y\in\mathcal C_t}D_y(h).$$
 
