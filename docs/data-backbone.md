@@ -26,8 +26,8 @@ Máy chỉ có CPU: thay index PyTorch bằng `https://download.pytorch.org/whl/
 ## Smoke backbone và feature task kế tiếp
 
 ```powershell
-.venv\Scripts\python src/scripts/run_experiment.py train-base --config configs/smoke.yaml --output outputs/backbone-smoke
-.venv\Scripts\python src/scripts/run_experiment.py extract-features --config configs/smoke.yaml --checkpoint outputs/backbone-smoke/base.pt --task 1 --output outputs/backbone-smoke-task1
+.venv\Scripts\python scripts/run_experiment.py train-base --config configs/smoke.yaml --output outputs/backbone-smoke
+.venv\Scripts\python scripts/run_experiment.py extract-features --config configs/smoke.yaml --checkpoint outputs/backbone-smoke/base.pt --task 1 --output outputs/backbone-smoke-task1
 ```
 
 Các lệnh `train-base` và `extract-features` kiểm tra riêng backbone/checkpoint. Để đánh giá end-to-end gồm classifier và accuracy incremental, chạy `python scripts/run_experiment.py --config configs/smoke.yaml --device cpu` cho NCM hoặc `python scripts/run_experiment.py --config configs/smoke_fecam.yaml --device cpu` cho FeCAM. Mỗi YAML chạy một classifier; smoke dùng ít mẫu và không đại diện cho tái hiện đầy đủ. Summary end-to-end ghi accuracy theo session cùng các metrics CL; feature train không được dump ra đĩa.
@@ -35,13 +35,13 @@ Các lệnh `train-base` và `extract-features` kiểm tra riêng backbone/check
 ## Huấn luyện backbone chính khi đã sẵn sàng
 
 ```powershell
-.venv\Scripts\python src/scripts/run_experiment.py train-base --config configs/reproduction/cifar100_fecam.yaml --output outputs/cifar100-b50-seed1
+.venv\Scripts\python scripts/run_experiment.py train-base --config configs/reproduction/cifar100_fecam.yaml --output outputs/cifar100-b50-seed1
 ```
 
 Lệnh này chạy **200 epoch**, chưa được tự khởi chạy bởi thay đổi data/backbone. Chỉ chạy sau khi có tài nguyên/thời gian phù hợp và đã kiểm tra pilot; checkpoint hiện chưa hỗ trợ resume training giữa chừng. `base.pt` lưu sau epoch cuối, `epochs.jsonl` lưu tiến độ từng epoch. Nếu cần tái sử dụng cho NCM, dùng cùng checkpoint và config NCM có cùng trường data/split/backbone/training.
 
 ```powershell
-.venv\Scripts\python src/scripts/run_experiment.py extract-features --config configs/reproduction/cifar100_ncm.yaml --checkpoint outputs/cifar100-b50-seed1/base.pt --task 1 --output outputs/cifar100-b50-task1
+.venv\Scripts\python scripts/run_experiment.py extract-features --config configs/reproduction/cifar100_ncm.yaml --checkpoint outputs/cifar100-b50-seed1/base.pt --task 1 --output outputs/cifar100-b50-task1
 ```
 
 CLI `extract-features` chỉ kiểm tra luồng extraction và không lưu feature ra đĩa. Đánh giá NCM/FeCAM hoàn chỉnh hiện được thực hiện bởi `scripts/run_experiment.py` với một YAML tương ứng.
