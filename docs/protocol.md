@@ -65,7 +65,7 @@ Implementation tái sử dụng [torchvision ResNet-18](https://docs.pytorch.org
 - `TaskSplit.classes(task, seen=False)` trả nhãn đã remap của lớp mới; `seen=True` trả tất cả lớp đã thấy.
 - `TaskDataset(..., source='train', seen=False, augment=False)` dùng trích xuất feature train task hiện tại; `source='test', seen=True` dùng đánh giá seen-classes. DataLoader trả `(images, labels)`.
 - `Backbone.extract_features(images)` trả **raw features**, chưa Tukey/chưa L2 normalize. `extract_features(model, loader, device)` trả tensor CPU `(features[N,512], labels[N])` đúng thứ tự loader, không gradient.
-- FeCAM sẽ thực hiện Tukey beta=0.5, covariance đầy đủ theo lớp, shrinkage gamma1=gamma2=1 và correlation normalization. NCM dùng khoảng cách Euclidean trên feature/prototype chuẩn hóa, không Tukey. Tham số được ghi sẵn trong config nhưng runner hiện **chưa chạy classifier**.
+- FeCAM thực hiện Tukey beta=0.5, covariance đầy đủ theo lớp, shrinkage gamma1=gamma2=1 và correlation normalization. NCM dùng khoảng cách Euclidean trên feature/prototype chuẩn hóa, không Tukey. `scripts/run_experiment.py` đã chạy classifier và đánh giá incremental cho smoke configs; kết quả reproduction đầy đủ chưa được xác nhận.
 - NCM/FeCAM dùng cùng checkpoint task đầu. Tính prototype/covariance từ train task hiện tại, giữ thống kê cần thiết; không lưu ảnh/feature mẫu cũ cho task sau. Runner chỉ lưu summary feature, không dump feature train ra đĩa.
 - Checkpoint gồm weights, số lớp head và metadata plain gồm config/order/seed/phiên bản/hash code; nạp với `weights_only=True`, kiểm tra config/order trước extract. Không tương thích trực tiếp checkpoint của tác giả do tên module khác.
 
@@ -73,6 +73,6 @@ Implementation tái sử dụng [torchvision ResNet-18](https://docs.pytorch.org
 
 Mỗi lệnh tạo thư mục output mới, không ghi đè: `manifest.json`, `summary.json` hoặc `failure.json`. Train thêm `epochs.jsonl` và `base.pt`. Lưu dataset fingerprint, Git commit/trạng thái chưa commit, hash source, phiên bản package, thiết bị, thời gian epoch/extraction và đỉnh VRAM khi dùng CUDA. Manifest có task counts để kiểm tra rò rỉ lớp.
 
-Checkpoint hiện lưu sau khi train xong task đầu và hỗ trợ **nạp để extraction**, chưa lưu optimizer/RNG để tiếp tục training giữa epoch. Trước run 200 epoch trên Colab/Kaggle dễ ngắt phiên, cần bổ sung resume theo epoch. W&B, NCM, FeCAM và full incremental runner là bước tích hợp tiếp theo; log local hiện tại không thay thế tracking công khai khi báo cáo số liệu.
+Checkpoint hiện lưu sau khi train xong task đầu và hỗ trợ **nạp để extraction**, chưa lưu optimizer/RNG để tiếp tục training giữa epoch. Trước run 200 epoch trên Colab/Kaggle dễ ngắt phiên, cần bổ sung resume theo epoch. Full reproduction, resume theo epoch và tracking W&B tự động trong runner vẫn là các bước cần hoàn thiện; smoke summaries đã có thể upload bằng script riêng.
 
 Không dùng test để chọn siêu tham số. Không suy ra ETA run chính từ smoke vài chục mẫu; cần pilot full dữ liệu task đầu và stage classifier trước khi bắt đầu tái hiện chính.
