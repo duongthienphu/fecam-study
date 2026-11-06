@@ -35,7 +35,7 @@ Code tác giả chỉ được đọc để đối chiếu cấu hình/kiến tr
 
 Class-order seed `1993` và training seed `1` là hai giá trị riêng. Config hiện tại tái lập setting phát hành một order/một training seed. Nếu khảo sát thêm seed, giữ nguyên recipe và ghi cả hai seed; không tự gọi một run là kết quả nhiều seed.
 
-Smoke dùng **10 lớp đầu của cùng permutation 100 lớp**, B=5, increment=5; lấy 8 train và 4 test mẫu đầu theo thứ tự nguồn cho mỗi lớp; 1 epoch, batch 16. Giới hạn này có chủ đích để kiểm tra đường dữ liệu và không thuộc kết quả tái hiện.
+Smoke dùng **10 lớp đầu của cùng permutation 100 lớp**, B=5, increment=5; dùng toàn bộ 500 ảnh train và 100 ảnh test cho mỗi lớp đã chọn; 3 epoch, batch 16. Giới hạn 10 lớp và backbone 3 epoch có chủ đích để kiểm tra đường dữ liệu và không thuộc kết quả tái hiện đầy đủ.
 
 ## Backbone và training đã chốt
 
@@ -71,8 +71,8 @@ Implementation tái sử dụng [torchvision ResNet-18](https://docs.pytorch.org
 
 ## Truy vết và giới hạn vận hành
 
-Mỗi lệnh tạo thư mục output mới, không ghi đè: `manifest.json`, `summary.json` hoặc `failure.json`. Train thêm `epochs.jsonl` và `base.pt`. Lưu dataset fingerprint, Git commit/trạng thái chưa commit, hash source, phiên bản package, thiết bị, thời gian epoch/extraction và đỉnh VRAM khi dùng CUDA. Manifest có task counts để kiểm tra rò rỉ lớp.
+Lệnh mới tạo thư mục output; `--resume` chỉ dùng thư mục đang có checkpoint và chưa có `summary.json`. Runner lưu `base_training_checkpoint.pt` sau mỗi epoch bằng ghi tạm rồi thay thế nguyên tử, nên checkpoint trước đó vẫn còn nếu lần ghi mới bị gián đoạn. Summary ghi thời gian train tổng cộng qua các lần resume. Manifest có task counts để kiểm tra rò rỉ lớp.
 
-Checkpoint hiện lưu sau khi train xong task đầu và hỗ trợ **nạp để extraction**, chưa lưu optimizer/RNG để tiếp tục training giữa epoch. Trước run 200 epoch trên Colab/Kaggle dễ ngắt phiên, cần bổ sung resume theo epoch. Full reproduction, resume theo epoch và tracking W&B tự động trong runner vẫn là các bước cần hoàn thiện; smoke summaries đã có thể upload bằng script riêng.
+Checkpoint weights-only `base.pt` dùng để nạp cho extraction. Checkpoint `base_training_checkpoint.pt` giữ thêm optimizer, scheduler, RNG và trạng thái DataLoader để tiếp tục từ đầu epoch kế tiếp. Nếu Kaggle khởi tạo working directory mới, cần tải/đính kèm checkpoint và chép lại vào thư mục output trước khi dùng `--resume`. Full reproduction và tracking W&B tự động trong runner vẫn là các bước cần hoàn thiện; smoke summaries đã có thể upload bằng script riêng.
 
 Không dùng test để chọn siêu tham số. Không suy ra ETA run chính từ smoke vài chục mẫu; cần pilot full dữ liệu task đầu và stage classifier trước khi bắt đầu tái hiện chính.

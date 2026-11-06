@@ -38,7 +38,15 @@ Các lệnh `train-base` và `extract-features` kiểm tra riêng backbone/check
 .venv\Scripts\python scripts/run_experiment.py train-base --config configs/reproduction/cifar100_fecam.yaml --output outputs/cifar100-b50-seed1
 ```
 
-Lệnh này chạy **200 epoch**, chưa được tự khởi chạy bởi thay đổi data/backbone. Chỉ chạy sau khi có tài nguyên/thời gian phù hợp và đã kiểm tra pilot; checkpoint hiện chưa hỗ trợ resume training giữa chừng. `base.pt` lưu sau epoch cuối, `epochs.jsonl` lưu tiến độ từng epoch. Nếu cần tái sử dụng cho NCM, dùng cùng checkpoint và config NCM có cùng trường data/split/backbone/training.
+Lệnh này chạy **200 epoch**. Sau mỗi epoch, runner ghi atomically `base_training_checkpoint.pt`, gồm weights, optimizer, scheduler, lịch sử epoch và trạng thái RNG/DataLoader. Nếu phiên bị dừng, chạy lại cùng lệnh, cùng config và output, thêm `--resume` để tiếp tục từ checkpoint gần nhất:
+
+```powershell
+.venv\Scripts\python scripts/run_experiment.py train-base --config configs/reproduction/cifar100_fecam.yaml --output outputs/cifar100-b50-seed1 --resume --device auto
+```
+
+`--resume` kiểm tra config, class order, commit code và tổng số epoch; không đổi các giá trị này giữa những lần tiếp tục. Khi chạy `evaluate`, checkpoint backbone cũng được lưu trong thư mục output để có thể tiếp tục train nếu cần. Trên Kaggle, giữ hoặc tải checkpoint ra trước khi phiên dừng; ở phiên mới, đặt nó lại đúng đường dẫn `outputs/<run>/base_training_checkpoint.pt` rồi chạy với `--resume`.
+
+`base.pt` vẫn được lưu sau khi hoàn tất tác vụ `train-base`. Nếu cần tái sử dụng cho NCM, dùng cùng checkpoint và config NCM có cùng trường data/split/backbone/training.
 
 ```powershell
 .venv\Scripts\python scripts/run_experiment.py extract-features --config configs/reproduction/cifar100_ncm.yaml --checkpoint outputs/cifar100-b50-seed1/base.pt --task 1 --output outputs/cifar100-b50-task1
@@ -50,7 +58,8 @@ CLI `extract-features` chỉ kiểm tra luồng extraction và không lưu featu
 
 - `manifest.json`: config đầy đủ, class order/mapping, code hash, môi trường và thiết bị lúc bắt đầu.
 - `summary.json`: trạng thái hoàn tất, thống kê dữ liệu/task, dataset fingerprint, số đo và checksum checkpoint nếu có.
-- `epochs.jsonl` / `base.pt`: tiến độ train / checkpoint backbone task đầu.
+- `base_training_checkpoint.pt`: checkpoint resume đầy đủ được thay thế atomically sau mỗi epoch.
+- `base.pt`: checkpoint weights-only sau khi hoàn tất action `train-base`.
 - `failure.json`: lỗi gặp khi tải/train/extract; traceback vẫn hiện ở terminal.
 
 Data/checkpoint/output được Git ignore. Đưa kết quả kiểm chứng ngắn vào docs khi cần báo cáo. Không có W&B upload hay public result trong luồng hiện tại.

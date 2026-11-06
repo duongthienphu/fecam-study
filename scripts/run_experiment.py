@@ -109,8 +109,12 @@ def main(argv=None):
     parser.add_argument('--checkpoint')
     parser.add_argument('--task', type=int, default=0)
     parser.add_argument('--output', help='New output directory; it cannot already exist')
+    parser.add_argument('--resume', action='store_true',
+                        help='Resume base-backbone training from OUTPUT/base_training_checkpoint.pt')
     parser.add_argument('--device', default='auto', help='auto, cpu, cuda or cuda:0')
     args = parser.parse_args(argv)
+    if args.resume and (args.action not in ('train-base', 'evaluate') or not args.output):
+        parser.error('--resume requires train-base/evaluate and an explicit --output directory')
     config = load_config(args.config)
     split = TaskSplit(**config['split'])
     split.classes(args.task)
@@ -125,7 +129,19 @@ def main(argv=None):
     output = Path(args.output) if args.output else ROOT / 'outputs' / f"smoke-{config['classifier']['name']}-{started:%Y%m%dT%H%M%SZ}"
     if not output.is_absolute():
         output = ROOT / output
-    output.mkdir(parents=True, exist_ok=False)
+    training_checkpoint = output / 'base_training_checkpoint.pt'
+    if args.resume:
+        if not output.is_dir():
+            raise FileNotFoundError(f'Cannot resume; output directory does not exist: {output}')
+        if (output / 'summary.json').exists():
+            raise FileExistsError(f'Run is already complete: {output / "summary.json"}')
+        if not training_checkpoint.is_file():
+            raise FileNotFoundError(f'Cannot resume; checkpoint does not exist: {training_checkpoint}')
+        stale_failure = output / 'failure.json'
+        if stale_failure.exists():
+            stale_failure.unlink()
+    else:
+        output.mkdir(parents=True, exist_ok=False)
     manifest = {
         'action': args.action, 'started_utc': started.isoformat(), 'status': 'running',
         'config': config, 'class_order': split.class_order, 'tasks': split.tasks,
@@ -185,8 +201,26 @@ def main(argv=None):
         else:
             model = Backbone(config['split']['initial_classes'])
             base_loader = make_loader(data, split, config, 0, 'train', device, augment=True)
-            history = train_base(model, base_loader, device=device, **config['training'])
+
+            def report_epoch(record):
+                print(json.dumps({'base_training_epoch': record}, allow_nan=False), flush=True)
+
+            training_metadata = {
+                'config': config,
+                'class_order': split.class_order,
+                'git_commit': manifest['provenance']['git_commit'],
+            }
+            history = train_base(
+                model, base_loader, device=device, on_epoch=report_epoch,
+                checkpoint_path=training_checkpoint,
+                resume=args.resume, checkpoint_metadata=training_metadata,
+                **config['training'],
+            )
             manifest['base_training'] = history
+            manifest['base_training_wall_seconds'] = (
+                history[-1].get('cumulative_training_wall_seconds') if history else 0.0
+            )
+            manifest['training_checkpoint'] = str(training_checkpoint.resolve())
             if args.action == 'train-base':
                 metadata = {'config': config, 'class_order': split.class_order,
                             'provenance': manifest['provenance'], 'epochs_completed': len(history)}
