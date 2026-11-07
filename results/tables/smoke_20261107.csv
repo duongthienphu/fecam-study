@@ -1,0 +1,3 @@
+run_date,classifier,protocol,seed,class_order_seed,dataset_source,device,epochs,classes,train_samples_per_class,test_samples_per_class,weight_decay,session_accuracy_percent,avg_acc_percent,final_acc_percent,bwt_percent,fwt
+2026-11-07,ncm,cifar100-smoke-b5-i5-v1,1,1993,huggingface-pinned-revision,cpu,3,10,500,100,0.0001,"[74.0,42.8]",58.4,42.8,-10.2,not_measured
+2026-11-07,fecam,cifar100-smoke-b5-i5-v1,1,1993,huggingface-pinned-revision,cpu,3,10,500,100,0.0001,"[76.8,51.7]",64.25,51.7,-14.0,not_measured
