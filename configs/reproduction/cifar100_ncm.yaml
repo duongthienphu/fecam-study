@@ -25,5 +25,5 @@ classifier:
   name: ncm
   metric: euclidean
   tukey_beta: null
-  normalize_features: true
-  normalize_prototypes: true
+  normalize_features: false
+  normalize_prototypes: false
