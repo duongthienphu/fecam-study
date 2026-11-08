@@ -123,6 +123,23 @@ def checkpoint_sha256(path):
     return digest.hexdigest()
 
 
+def tensor_storage_record(tensor):
+    """Measure bytes in a tensor's backing storage (not allocator/process peak)."""
+    nbytes = tensor.untyped_storage().nbytes() if tensor.numel() else 0
+    device_type = tensor.device.type
+    return {
+        'device': str(tensor.device),
+        'dtype': str(tensor.dtype),
+        'shape': list(tensor.shape),
+        'storage_bytes': nbytes,
+        'storage_mib': round(nbytes / (1024 ** 2), 6),
+        'storage_ram_bytes': nbytes if device_type == 'cpu' else 0,
+        'storage_vram_bytes': nbytes if device_type == 'cuda' else 0,
+        'storage_ram_mib': round(nbytes / (1024 ** 2), 6) if device_type == 'cpu' else 0.0,
+        'storage_vram_mib': round(nbytes / (1024 ** 2), 6) if device_type == 'cuda' else 0.0,
+    }
+
+
 def validate_checkpoint(metadata, config, split):
     checkpoint_config = metadata['config']
     for key in ('protocol', 'seed', 'dataset', 'split', 'backbone', 'training'):
@@ -342,11 +359,21 @@ def main(argv=None):
         task_sizes = [len(task) for task in split.tasks]
         metrics = CLMetrics(len(split.tasks), task_sizes=task_sizes)
         sessions = []
+        matrix_storage_by_task = []
         class_names = data['test'].features['fine_label'].names
         for task_id in range(len(split.tasks)):
             train_loader = make_loader(data, split, config, task_id, 'train', device)
             train_features, train_labels = extract_features(model, train_loader, device)
             update(train_features, train_labels)
+            if classifier_cfg['name'] == 'fecam':
+                # FeCAM persists Cholesky factors as its per-class matrix state.
+                # Measure the actual backing storage after each incremental update.
+                matrix_storage_by_task.append({
+                    'task': task_id,
+                    'mode': classifier.mode,
+                    'classes_stored': classifier.num_classes,
+                    'matrix_state': tensor_storage_record(classifier.factors),
+                })
             task_accuracies = []
             class_counts = {}
             for eval_task in range(task_id + 1):
@@ -411,6 +438,8 @@ def main(argv=None):
             'classifier': classifier_cfg, 'sessions': sessions, 'metrics': final_metrics,
             'accuracy_matrix': [[None if not np.isfinite(v) else float(v) for v in row] for row in matrix],
         }
+        if classifier_cfg['name'] == 'fecam':
+            manifest['evaluation']['matrix_storage_by_task'] = matrix_storage_by_task
         manifest['memory'] = (memory_monitor.stop(cuda_device_index, measure_cuda_memory)
                               if memory_monitor else None)
         manifest['status'] = 'completed'

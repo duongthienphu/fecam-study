@@ -57,6 +57,13 @@ def compare(full_path, identity_path, output_dir):
         left, right = memory_value(full_memory, key), memory_value(identity_memory, key)
         return None if left is None or right is None else right - left
 
+    def final_matrix_storage(summary, field):
+        rows = summary.get('evaluation', {}).get('matrix_storage_by_task', [])
+        if not rows:
+            return None
+        state = rows[-1].get('matrix_state', {})
+        return state.get(field)
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     per_class_rows = []
@@ -105,6 +112,24 @@ def compare(full_path, identity_path, output_dir):
         'full_peak_vram_reserved_mb': memory_value(full_memory, 'peak_vram_reserved_mb'),
         'identity_peak_vram_reserved_mb': memory_value(identity_memory, 'peak_vram_reserved_mb'),
         'delta_peak_vram_reserved_mb': memory_delta('peak_vram_reserved_mb'),
+        # Actual backing-storage bytes for the persistent FeCAM matrix state,
+        # measured from classifier.factors after the final task.
+        'full_matrix_factor_ram_mib': final_matrix_storage(full, 'storage_ram_mib'),
+        'identity_matrix_factor_ram_mib': final_matrix_storage(identity, 'storage_ram_mib'),
+        'delta_matrix_factor_ram_mib': (
+            final_matrix_storage(identity, 'storage_ram_mib')
+            - final_matrix_storage(full, 'storage_ram_mib')
+            if final_matrix_storage(full, 'storage_ram_mib') is not None
+            and final_matrix_storage(identity, 'storage_ram_mib') is not None else None
+        ),
+        'full_matrix_factor_vram_mib': final_matrix_storage(full, 'storage_vram_mib'),
+        'identity_matrix_factor_vram_mib': final_matrix_storage(identity, 'storage_vram_mib'),
+        'delta_matrix_factor_vram_mib': (
+            final_matrix_storage(identity, 'storage_vram_mib')
+            - final_matrix_storage(full, 'storage_vram_mib')
+            if final_matrix_storage(full, 'storage_vram_mib') is not None
+            and final_matrix_storage(identity, 'storage_vram_mib') is not None else None
+        ),
     }
     summary_path = output_dir / 'fecam_mode_summary_comparison.csv'
     summary_fields = list(summary_row)
