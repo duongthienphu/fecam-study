@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -154,7 +155,7 @@ class PeakMemoryMonitor:
         if self.process is not None:
             self._thread.start()
 
-    def stop(self, device):
+    def stop(self, cuda_device_index=None, measure_cuda=True):
         self._stop.set()
         if self._thread.ident is not None:
             self._thread.join()
@@ -173,17 +174,20 @@ class PeakMemoryMonitor:
             'peak_vram_reserved_bytes': None,
             'peak_vram_reserved_mb': None,
         }
-        if str(device).startswith('cuda') and torch.cuda.is_available():
-            torch.cuda.synchronize(device)
-            allocated = torch.cuda.max_memory_allocated(device)
-            reserved = torch.cuda.max_memory_reserved(device)
-            result.update({
-                'peak_vram_allocated_bytes': allocated,
-                'peak_vram_allocated_mb': round(allocated / (1024 ** 2), 3),
-                'peak_vram_reserved_bytes': reserved,
-                'peak_vram_reserved_mb': round(reserved / (1024 ** 2), 3),
-                'cuda_device': str(device),
-            })
+        if measure_cuda and cuda_device_index is not None and torch.cuda.is_available():
+            try:
+                torch.cuda.synchronize(cuda_device_index)
+                allocated = torch.cuda.max_memory_allocated(cuda_device_index)
+                reserved = torch.cuda.max_memory_reserved(cuda_device_index)
+                result.update({
+                    'peak_vram_allocated_bytes': allocated,
+                    'peak_vram_allocated_mb': round(allocated / (1024 ** 2), 3),
+                    'peak_vram_reserved_bytes': reserved,
+                    'peak_vram_reserved_mb': round(reserved / (1024 ** 2), 3),
+                    'cuda_device': f'cuda:{cuda_device_index}',
+                })
+            except RuntimeError as exc:
+                result['vram_measurement_warning'] = str(exc)
         return result
 
 
@@ -205,6 +209,19 @@ def main(argv=None):
     device = ('cuda' if torch.cuda.is_available() else 'cpu') if args.device == 'auto' else args.device
     if str(device).startswith('cuda') and not torch.cuda.is_available():
         raise RuntimeError('CUDA requested but unavailable')
+    cuda_device_index = None
+    if str(device).startswith('cuda'):
+        requested_device = torch.device(device)
+        cuda_device_index = (torch.cuda.current_device() if requested_device.index is None
+                             else requested_device.index)
+        visible_gpu_count = torch.cuda.device_count()
+        if not 0 <= cuda_device_index < visible_gpu_count:
+            raise RuntimeError(
+                f'Requested {device}, but this process sees {visible_gpu_count} CUDA GPU(s). '
+                'Check CUDA_VISIBLE_DEVICES and the assigned GPU index.'
+            )
+        torch.cuda.set_device(cuda_device_index)
+        device = f'cuda:{cuda_device_index}'
     seed_everything(config['seed'])
     torch.set_num_threads(min(4, torch.get_num_threads()))
     started = datetime.now(timezone.utc)
@@ -215,12 +232,21 @@ def main(argv=None):
     manifest = {
         'action': args.action, 'started_utc': started.isoformat(), 'status': 'running',
         'config': config, 'class_order': split.class_order, 'tasks': split.tasks,
-        'label_map': split.label_map, 'device': device, 'provenance': provenance(),
+        'label_map': split.label_map, 'device': device,
+        'assigned_gpu': os.environ.get('FECAM_ASSIGNED_GPU', device),
+        'provenance': provenance(),
     }
     memory_monitor = PeakMemoryMonitor() if args.action == 'evaluate' else None
+    measure_cuda_memory = cuda_device_index is not None
     if memory_monitor:
-        if str(device).startswith('cuda'):
-            torch.cuda.reset_peak_memory_stats(device)
+        if measure_cuda_memory:
+            try:
+                # PyTorch expects a device object or index; use the validated index.
+                torch.cuda.reset_peak_memory_stats(cuda_device_index)
+            except RuntimeError as exc:
+                measure_cuda_memory = False
+                manifest['vram_measurement_warning'] = str(exc)
+                print(f'Warning: VRAM peak tracking disabled: {exc}', flush=True)
         memory_monitor.start()
     try:
         data_start = perf_counter()
@@ -385,14 +411,15 @@ def main(argv=None):
             'classifier': classifier_cfg, 'sessions': sessions, 'metrics': final_metrics,
             'accuracy_matrix': [[None if not np.isfinite(v) else float(v) for v in row] for row in matrix],
         }
-        manifest['memory'] = memory_monitor.stop(device) if memory_monitor else None
+        manifest['memory'] = (memory_monitor.stop(cuda_device_index, measure_cuda_memory)
+                              if memory_monitor else None)
         manifest['status'] = 'completed'
         write_json(output / 'summary.json', manifest)
         print(f'Completed smoke evaluation: {output}', flush=True)
     except Exception as exc:
         failure = {'type': type(exc).__name__, 'error': str(exc)}
         if memory_monitor and memory_monitor._thread.is_alive():
-            failure['memory'] = memory_monitor.stop(device)
+            failure['memory'] = memory_monitor.stop(cuda_device_index, measure_cuda_memory)
         write_json(output / 'failure.json', failure)
         raise
 
