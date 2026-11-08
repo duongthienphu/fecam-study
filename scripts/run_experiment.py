@@ -1,12 +1,12 @@
 """Run a short, task-incremental NCM or FeCAM evaluation from a YAML config."""
 
 import argparse
-import csv
 import hashlib
 import json
 import platform
 import subprocess
 import sys
+import threading
 from collections import Counter
 from datetime import datetime, timezone
 from importlib.metadata import version
@@ -20,6 +20,11 @@ import numpy as np
 import torch
 import yaml
 from torch.utils.data import DataLoader
+
+try:
+    import psutil
+except ImportError:  # Local CPU smoke runs can proceed without optional telemetry.
+    psutil = None
 
 from src.data.datasets import DATASET_ID, DATASET_REVISION, TaskDataset, load_cifar100
 from src.data.task_split import TaskSplit
@@ -99,6 +104,8 @@ def write_json(path, value):
 def provenance():
     result = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True, capture_output=True)
     package_names = ('torch', 'torchvision', 'numpy', 'Pillow', 'datasets', 'PyYAML')
+    if psutil is not None:
+        package_names += ('psutil',)
     return {
         'git_commit': result.stdout.strip() if result.returncode == 0 else None,
         'python': platform.python_version(), 'platform': platform.platform(),
@@ -122,6 +129,62 @@ def validate_checkpoint(metadata, config, split):
             raise ValueError(f'Checkpoint/config mismatch: {key}')
     if metadata['class_order'] != split.class_order:
         raise ValueError('Checkpoint class order mismatch')
+
+
+class PeakMemoryMonitor:
+    """Sample process RSS; CUDA peak stats are collected from torch at stop()."""
+
+    def __init__(self, interval_seconds=0.1):
+        self.process = psutil.Process() if psutil is not None else None
+        self.interval_seconds = interval_seconds
+        self.peak_rss_bytes = self.process.memory_info().rss if self.process else None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._sample, daemon=True)
+
+    def _sample(self):
+        if self.process is None:
+            return
+        while not self._stop.wait(self.interval_seconds):
+            try:
+                self.peak_rss_bytes = max(self.peak_rss_bytes, self.process.memory_info().rss)
+            except psutil.Error:
+                return
+
+    def start(self):
+        if self.process is not None:
+            self._thread.start()
+
+    def stop(self, device):
+        self._stop.set()
+        if self._thread.ident is not None:
+            self._thread.join()
+        if self.process is not None:
+            try:
+                self.peak_rss_bytes = max(self.peak_rss_bytes, self.process.memory_info().rss)
+            except psutil.Error:
+                pass
+        result = {
+            'peak_ram_rss_bytes': self.peak_rss_bytes,
+            'peak_ram_rss_mb': (round(self.peak_rss_bytes / (1024 ** 2), 3)
+                                if self.peak_rss_bytes is not None else None),
+            'ram_sample_interval_seconds': self.interval_seconds,
+            'peak_vram_allocated_bytes': None,
+            'peak_vram_allocated_mb': None,
+            'peak_vram_reserved_bytes': None,
+            'peak_vram_reserved_mb': None,
+        }
+        if str(device).startswith('cuda') and torch.cuda.is_available():
+            torch.cuda.synchronize(device)
+            allocated = torch.cuda.max_memory_allocated(device)
+            reserved = torch.cuda.max_memory_reserved(device)
+            result.update({
+                'peak_vram_allocated_bytes': allocated,
+                'peak_vram_allocated_mb': round(allocated / (1024 ** 2), 3),
+                'peak_vram_reserved_bytes': reserved,
+                'peak_vram_reserved_mb': round(reserved / (1024 ** 2), 3),
+                'cuda_device': str(device),
+            })
+        return result
 
 
 def main(argv=None):
@@ -154,6 +217,11 @@ def main(argv=None):
         'config': config, 'class_order': split.class_order, 'tasks': split.tasks,
         'label_map': split.label_map, 'device': device, 'provenance': provenance(),
     }
+    memory_monitor = PeakMemoryMonitor() if args.action == 'evaluate' else None
+    if memory_monitor:
+        if str(device).startswith('cuda'):
+            torch.cuda.reset_peak_memory_stats(device)
+        memory_monitor.start()
     try:
         data_start = perf_counter()
         data_root = Path(config['dataset'].get('root', 'data'))
@@ -248,7 +316,6 @@ def main(argv=None):
         task_sizes = [len(task) for task in split.tasks]
         metrics = CLMetrics(len(split.tasks), task_sizes=task_sizes)
         sessions = []
-        per_class_rows = []
         class_names = data['test'].features['fine_label'].names
         for task_id in range(len(split.tasks)):
             train_loader = make_loader(data, split, config, task_id, 'train', device)
@@ -282,13 +349,13 @@ def main(argv=None):
                     'original_class_id': original_id,
                     'class_name': class_names[original_id],
                     'group': group,
+                    'class_role': 'backbone_train' if group == 'base' else 'incremental_new',
                     'introduced_task': introduced_task,
                     'correct': n_correct,
                     'total': n_total,
                     'accuracy_percent': 100.0 * n_correct / n_total,
                 }
                 class_rows.append(row)
-                per_class_rows.append(row)
             group_accuracy = {}
             for group in ('base', 'incremental'):
                 group_counts = [row for row in class_rows if row['group'] == group]
@@ -317,19 +384,16 @@ def main(argv=None):
         manifest['evaluation'] = {
             'classifier': classifier_cfg, 'sessions': sessions, 'metrics': final_metrics,
             'accuracy_matrix': [[None if not np.isfinite(v) else float(v) for v in row] for row in matrix],
-            'per_class_accuracy_csv': str((output / 'per_class_accuracy.csv').resolve()),
         }
-        with (output / 'per_class_accuracy.csv').open('w', newline='', encoding='utf-8') as handle:
-            writer = csv.DictWriter(handle, fieldnames=(
-                'task', 'class_id', 'original_class_id', 'class_name', 'group',
-                'introduced_task', 'correct', 'total', 'accuracy_percent'))
-            writer.writeheader()
-            writer.writerows(per_class_rows)
+        manifest['memory'] = memory_monitor.stop(device) if memory_monitor else None
         manifest['status'] = 'completed'
         write_json(output / 'summary.json', manifest)
         print(f'Completed smoke evaluation: {output}', flush=True)
     except Exception as exc:
-        write_json(output / 'failure.json', {'type': type(exc).__name__, 'error': str(exc)})
+        failure = {'type': type(exc).__name__, 'error': str(exc)}
+        if memory_monitor and memory_monitor._thread.is_alive():
+            failure['memory'] = memory_monitor.stop(device)
+        write_json(output / 'failure.json', failure)
         raise
 
 

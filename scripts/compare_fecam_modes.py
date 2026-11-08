@@ -47,56 +47,72 @@ def compare(full_path, identity_path, output_dir):
     if full_rows.keys() != identity_rows.keys():
         raise ValueError('The runs do not contain the same task/class evaluations')
 
+    full_memory = full.get('memory') or {}
+    identity_memory = identity.get('memory') or {}
+
+    def memory_value(summary_memory, key):
+        return summary_memory.get(key)
+
+    def memory_delta(key):
+        left, right = memory_value(full_memory, key), memory_value(identity_memory, key)
+        return None if left is None or right is None else right - left
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    per_class_path = output_dir / 'fecam_mode_per_class_comparison.csv'
+    per_class_rows = []
     per_class_rows = []
     for key in sorted(full_rows):
         a, b = full_rows[key], identity_rows[key]
-        if a['group'] != b['group'] or a['total'] != b['total']:
+        if a['group'] != b['group'] or a['class_role'] != b['class_role'] or a['total'] != b['total']:
             raise ValueError(f'Mismatched class evaluation for task/class {key}')
         per_class_rows.append({
-            'task': key[0], 'class_id': key[1], 'original_class_id': a['original_class_id'],
-            'class_name': a['class_name'], 'group': a['group'], 'introduced_task': a['introduced_task'],
-            'total': a['total'], 'full_correct': a['correct'], 'identity_correct': b['correct'],
+            'task': key[0], 'class_name': a['class_name'],
+            'original_class_id': a['original_class_id'], 'group': a['group'], 'total': a['total'],
             'full_accuracy_percent': a['accuracy_percent'],
             'identity_accuracy_percent': b['accuracy_percent'],
             'delta_identity_minus_full_pp': b['accuracy_percent'] - a['accuracy_percent'],
         })
+    per_class_path = output_dir / 'fecam_mode_per_class_comparison.csv'
+    per_class_fields = [
+        'task', 'class_name', 'original_class_id', 'group', 'total', 'full_accuracy_percent',
+        'identity_accuracy_percent', 'delta_identity_minus_full_pp']
     with per_class_path.open('w', newline='', encoding='utf-8') as handle:
-        fields = list(per_class_rows[0]) if per_class_rows else [
-            'task', 'class_id', 'original_class_id', 'class_name', 'group', 'introduced_task',
-            'total', 'full_correct', 'identity_correct', 'full_accuracy_percent',
-            'identity_accuracy_percent', 'delta_identity_minus_full_pp']
-        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer = csv.DictWriter(handle, fieldnames=per_class_fields)
         writer.writeheader()
         writer.writerows(per_class_rows)
 
-    group_path = output_dir / 'fecam_mode_group_comparison.csv'
-    group_rows = []
-    for task in sorted({key[0] for key in full_rows}):
-        task_rows = [row for row in per_class_rows if row['task'] == task]
-        for group in ('base', 'incremental', 'all_seen'):
-            selected = task_rows if group == 'all_seen' else [row for row in task_rows if row['group'] == group]
-            total = sum(row['total'] for row in selected)
-            if not total:
-                continue
-            full_correct = sum(row['full_correct'] for row in selected)
-            identity_correct = sum(row['identity_correct'] for row in selected)
-            full_acc = 100.0 * full_correct / total
-            identity_acc = 100.0 * identity_correct / total
-            group_rows.append({
-                'task': task, 'group': group, 'total': total,
-                'full_accuracy_percent': full_acc, 'identity_accuracy_percent': identity_acc,
-                'delta_identity_minus_full_pp': identity_acc - full_acc,
-            })
-    with group_path.open('w', newline='', encoding='utf-8') as handle:
-        writer = csv.DictWriter(handle, fieldnames=(
-            'task', 'group', 'total', 'full_accuracy_percent', 'identity_accuracy_percent',
-            'delta_identity_minus_full_pp'))
+    full_metrics = full['evaluation']['metrics']
+    identity_metrics = identity['evaluation']['metrics']
+    summary_row = {
+        'protocol': full['config']['protocol'],
+        'seed': full['config']['seed'],
+        'checkpoint_sha256': full['checkpoint_sha256'],
+        'full_avg_accuracy_percent': full_metrics['avg_acc'],
+        'identity_avg_accuracy_percent': identity_metrics['avg_acc'],
+        'delta_avg_accuracy_pp': identity_metrics['avg_acc'] - full_metrics['avg_acc'],
+        'full_final_accuracy_percent': full_metrics['last_acc'],
+        'identity_final_accuracy_percent': identity_metrics['last_acc'],
+        'delta_final_accuracy_pp': identity_metrics['last_acc'] - full_metrics['last_acc'],
+        'full_bwt_percent': full_metrics['bwt'],
+        'identity_bwt_percent': identity_metrics['bwt'],
+        'delta_bwt_pp': identity_metrics['bwt'] - full_metrics['bwt'],
+        'full_peak_ram_rss_mb': memory_value(full_memory, 'peak_ram_rss_mb'),
+        'identity_peak_ram_rss_mb': memory_value(identity_memory, 'peak_ram_rss_mb'),
+        'delta_peak_ram_rss_mb': memory_delta('peak_ram_rss_mb'),
+        'full_peak_vram_allocated_mb': memory_value(full_memory, 'peak_vram_allocated_mb'),
+        'identity_peak_vram_allocated_mb': memory_value(identity_memory, 'peak_vram_allocated_mb'),
+        'delta_peak_vram_allocated_mb': memory_delta('peak_vram_allocated_mb'),
+        'full_peak_vram_reserved_mb': memory_value(full_memory, 'peak_vram_reserved_mb'),
+        'identity_peak_vram_reserved_mb': memory_value(identity_memory, 'peak_vram_reserved_mb'),
+        'delta_peak_vram_reserved_mb': memory_delta('peak_vram_reserved_mb'),
+    }
+    summary_path = output_dir / 'fecam_mode_summary_comparison.csv'
+    summary_fields = list(summary_row)
+    with summary_path.open('w', newline='', encoding='utf-8') as handle:
+        writer = csv.DictWriter(handle, fieldnames=summary_fields)
         writer.writeheader()
-        writer.writerows(group_rows)
-    return per_class_path, group_path
+        writer.writerow(summary_row)
+    return per_class_path, summary_path
 
 
 def main():

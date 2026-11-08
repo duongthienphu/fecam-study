@@ -45,8 +45,10 @@ python scripts/compare_fecam_modes.py \
 
 ## Outputs and interpretation
 
-- Each evaluation writes `per_class_accuracy.csv`: one row per seen class after each task, with base/incremental group, class name, correct count, total count, and accuracy.
-- `fecam_mode_per_class_comparison.csv` reports `identity - full` for each class and task in percentage points.
-- `fecam_mode_group_comparison.csv` reports base-class, incremental-class, and all-seen accuracy by task, also as `identity - full` percentage points.
+- Each evaluation stores per-class results in its `summary.json`; it does not create a separate CSV.
+- `fecam_mode_per_class_comparison.csv` contains one row per class per evaluated task: task, class name, original CIFAR ID, group, test count, both accuracies, and their delta.
+- `fecam_mode_summary_comparison.csv` contains one row with protocol/seed/checkpoint, Avg/Final/BWT, and both modes' peak RAM/VRAM with deltas (`identity - full`).
+- Base-class, incremental-class, and all-seen accuracy by task can be aggregated from the `per_class` rows using `group` and weighting each class accuracy by `total`.
+- Each summary records peak process RAM (RSS sampled every 0.1 seconds), peak CUDA allocated memory, and peak CUDA reserved memory. VRAM fields are empty for CPU runs. Memory numbers are process-level peaks, not a per-class allocation estimate.
 
 “Base” means the 50 classes in the initial task. “Incremental” means all classes added after task 0 that have appeared by the evaluated task. Per-class accuracy is correct test images divided by test images for that class. Group accuracy is pooled over the test images in that group. Smoke configs validate the pipeline only; use the full reproduction configs for reported results.
