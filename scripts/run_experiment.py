@@ -1,6 +1,8 @@
 """Run a short, task-incremental NCM or FeCAM evaluation from a YAML config."""
 
 import argparse
+import csv
+import hashlib
 import json
 import platform
 import subprocess
@@ -48,10 +50,14 @@ def load_config(path):
         if classifier.get('normalize_features', True) != classifier.get('normalize_prototypes', True):
             raise ValueError('NCM normalizes features and prototypes together')
     elif classifier.get('name') == 'fecam':
-        if not classifier.get('per_class_covariance') or not classifier.get('full_covariance'):
-            raise ValueError('This FeCAM implementation requires per-class full covariance')
-        if not classifier.get('correlation_normalization'):
-            raise ValueError('This FeCAM implementation requires correlation normalization')
+        mode = classifier.get('mode', 'full')
+        if mode not in ('full', 'identity'):
+            raise ValueError('FeCAM mode must be full or identity')
+        if mode == 'full' and (
+                not classifier.get('per_class_covariance')
+                or not classifier.get('full_covariance')
+                or not classifier.get('correlation_normalization')):
+            raise ValueError('FeCAM full mode requires per-class full covariance and correlation normalization')
         if classifier.get('tukey_beta') not in (None, 0.5):
             raise ValueError('This implementation supports Tukey beta=0.5 or no transform')
     else:
@@ -99,6 +105,23 @@ def provenance():
         'packages': {name: version(name) for name in package_names},
         'cuda_runtime': torch.version.cuda,
     }
+
+
+def checkpoint_sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def validate_checkpoint(metadata, config, split):
+    checkpoint_config = metadata['config']
+    for key in ('protocol', 'seed', 'dataset', 'split', 'backbone', 'training'):
+        if checkpoint_config[key] != config[key]:
+            raise ValueError(f'Checkpoint/config mismatch: {key}')
+    if metadata['class_order'] != split.class_order:
+        raise ValueError('Checkpoint class order mismatch')
 
 
 def main(argv=None):
@@ -162,12 +185,9 @@ def main(argv=None):
             return
         elif args.action == 'extract-features':
             model, metadata = load_checkpoint(args.checkpoint, device)
-            for key in ('protocol', 'seed', 'dataset', 'split', 'backbone', 'training'):
-                if metadata['config'][key] != config[key]:
-                    raise ValueError(f'Checkpoint/config mismatch: {key}')
-            if metadata['class_order'] != split.class_order:
-                raise ValueError('Checkpoint class order mismatch')
+            validate_checkpoint(metadata, config, split)
             manifest['checkpoint'] = str(Path(args.checkpoint).resolve())
+            manifest['checkpoint_sha256'] = checkpoint_sha256(args.checkpoint)
             manifest['features'] = {}
             for source in ('train', 'test'):
                 loader = make_loader(
@@ -183,19 +203,28 @@ def main(argv=None):
             print(f'Completed extract-features: {output}', flush=True)
             return
         else:
-            model = Backbone(config['split']['initial_classes'])
-            base_loader = make_loader(data, split, config, 0, 'train', device, augment=True)
-            history = train_base(model, base_loader, device=device, **config['training'])
-            manifest['base_training'] = history
-            if args.action == 'train-base':
-                metadata = {'config': config, 'class_order': split.class_order,
-                            'provenance': manifest['provenance'], 'epochs_completed': len(history)}
-                save_checkpoint(output / 'base.pt', model, metadata)
-                manifest['status'] = 'completed'
-                write_json(output / 'summary.json', manifest)
-                print(f'Completed train-base: {output}', flush=True)
-                return
-            model.freeze()
+            if args.action == 'evaluate' and args.checkpoint:
+                model, metadata = load_checkpoint(args.checkpoint, device)
+                validate_checkpoint(metadata, config, split)
+                manifest['checkpoint'] = str(Path(args.checkpoint).resolve())
+                manifest['checkpoint_sha256'] = checkpoint_sha256(args.checkpoint)
+                manifest['base_training'] = 'loaded_shared_checkpoint'
+            else:
+                model = Backbone(config['split']['initial_classes'])
+                base_loader = make_loader(data, split, config, 0, 'train', device, augment=True)
+                history = train_base(model, base_loader, device=device, **config['training'])
+                manifest['base_training'] = history
+                if args.action == 'train-base':
+                    metadata = {'config': config, 'class_order': split.class_order,
+                                'provenance': manifest['provenance'], 'epochs_completed': len(history)}
+                    save_checkpoint(output / 'base.pt', model, metadata)
+                    manifest['checkpoint'] = str((output / 'base.pt').resolve())
+                    manifest['checkpoint_sha256'] = checkpoint_sha256(output / 'base.pt')
+                    manifest['status'] = 'completed'
+                    write_json(output / 'summary.json', manifest)
+                    print(f'Completed train-base: {output}', flush=True)
+                    return
+                model.freeze()
 
         classifier_cfg = config['classifier']
         if classifier_cfg['name'] == 'ncm':
@@ -208,6 +237,7 @@ def main(argv=None):
         else:
             beta = classifier_cfg.get('tukey_beta')
             classifier = FeCAM(
+                mode=classifier_cfg.get('mode', 'full'),
                 transform='sqrt' if beta is not None else 'none',
                 gamma1=classifier_cfg.get('shrinkage_gamma1', 1.0),
                 gamma2=classifier_cfg.get('shrinkage_gamma2', 1.0), device='cpu',
@@ -218,21 +248,62 @@ def main(argv=None):
         task_sizes = [len(task) for task in split.tasks]
         metrics = CLMetrics(len(split.tasks), task_sizes=task_sizes)
         sessions = []
+        per_class_rows = []
+        class_names = data['test'].features['fine_label'].names
         for task_id in range(len(split.tasks)):
             train_loader = make_loader(data, split, config, task_id, 'train', device)
             train_features, train_labels = extract_features(model, train_loader, device)
             update(train_features, train_labels)
             task_accuracies = []
+            class_counts = {}
             for eval_task in range(task_id + 1):
                 test_loader = make_loader(data, split, config, eval_task, 'test', device)
                 test_features, test_labels = extract_features(model, test_loader, device)
                 prediction = predict(test_features)
-                task_accuracies.append(float(np.mean(prediction == test_labels.numpy()) * 100))
+                truth = test_labels.numpy()
+                correct_mask = prediction == truth
+                task_accuracies.append(float(np.mean(correct_mask) * 100))
+                for class_id in np.unique(truth):
+                    mask = truth == class_id
+                    counts = class_counts.setdefault(int(class_id), [0, 0])
+                    counts[0] += int(np.count_nonzero(correct_mask & mask))
+                    counts[1] += int(np.count_nonzero(mask))
             metrics.update(task_id, task_accuracies)
+            class_rows = []
+            base_classes = set(split.tasks[0])
+            for class_id, (n_correct, n_total) in sorted(class_counts.items()):
+                original_id = split.class_order[class_id]
+                group = 'base' if class_id in base_classes else 'incremental'
+                introduced_task = (0 if group == 'base' else
+                                   1 + (class_id - config['split']['initial_classes']) // config['split']['increment'])
+                row = {
+                    'task': task_id,
+                    'class_id': class_id,
+                    'original_class_id': original_id,
+                    'class_name': class_names[original_id],
+                    'group': group,
+                    'introduced_task': introduced_task,
+                    'correct': n_correct,
+                    'total': n_total,
+                    'accuracy_percent': 100.0 * n_correct / n_total,
+                }
+                class_rows.append(row)
+                per_class_rows.append(row)
+            group_accuracy = {}
+            for group in ('base', 'incremental'):
+                group_counts = [row for row in class_rows if row['group'] == group]
+                n_total = sum(row['total'] for row in group_counts)
+                group_accuracy[group] = (
+                    100.0 * sum(row['correct'] for row in group_counts) / n_total
+                    if n_total else None
+                )
             session = {
                 'task': task_id, 'classes_seen': sum(task_sizes[:task_id + 1]),
                 'task_accuracies': task_accuracies,
                 'seen_accuracy': float(np.average(task_accuracies, weights=task_sizes[:task_id + 1])),
+                'base_accuracy_percent': group_accuracy['base'],
+                'incremental_accuracy_percent': group_accuracy['incremental'],
+                'per_class_accuracy': class_rows,
             }
             sessions.append(session)
             print(json.dumps(session), flush=True)
@@ -246,7 +317,14 @@ def main(argv=None):
         manifest['evaluation'] = {
             'classifier': classifier_cfg, 'sessions': sessions, 'metrics': final_metrics,
             'accuracy_matrix': [[None if not np.isfinite(v) else float(v) for v in row] for row in matrix],
+            'per_class_accuracy_csv': str((output / 'per_class_accuracy.csv').resolve()),
         }
+        with (output / 'per_class_accuracy.csv').open('w', newline='', encoding='utf-8') as handle:
+            writer = csv.DictWriter(handle, fieldnames=(
+                'task', 'class_id', 'original_class_id', 'class_name', 'group',
+                'introduced_task', 'correct', 'total', 'accuracy_percent'))
+            writer.writeheader()
+            writer.writerows(per_class_rows)
         manifest['status'] = 'completed'
         write_json(output / 'summary.json', manifest)
         print(f'Completed smoke evaluation: {output}', flush=True)
