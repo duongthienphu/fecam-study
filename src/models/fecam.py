@@ -10,6 +10,11 @@ Choices made explicit for this first implementation:
 * Eq. (8) shrinkage precedes Eq. (7) correlation normalization.
 * Eq. (10) distance-only score: no Gaussian log-determinant or prior term.
 * Cholesky factors replace explicit inverses. Optional jitter is recorded.
+* mode="full" preserves the original FeCAM covariance pipeline (default).
+* mode="identity" uses I implicitly: squared Euclidean distance after the same
+  feature/prototype transform, with no covariance or Cholesky factors stored.
+  This is an ablation, not necessarily the project's NCM baseline.
+  No eigenvalue/eigenvector compression is implemented.
 
 These choices follow the project specification, not a verified match to the
 authors' source code. This is not yet a benchmark reproduction.
@@ -33,6 +38,7 @@ from torch import Tensor
 
 @dataclass(frozen=True)
 class _Config:
+    mode: str
     transform: str
     gamma1: float
     gamma2: float
@@ -51,12 +57,15 @@ class FeCAM:
     def __init__(
         self,
         *,
+        mode: str = "full",
         transform: str = "sqrt",
         gamma1: float = 1.0,
         gamma2: float = 1.0,
         jitter_schedule: Sequence[float] = (0.0, 1e-8, 1e-6, 1e-4, 1e-2),
         device: str | torch.device = "cpu",
     ) -> None:
+        if mode not in ("full", "identity"):
+            raise ValueError("mode must be 'full' or 'identity'.")
         if transform not in ("none", "sqrt"):
             raise ValueError("transform must be 'none' or 'sqrt'.")
         gamma1, gamma2 = float(gamma1), float(gamma2)
@@ -67,7 +76,7 @@ class FeCAM:
                 or any(not math.isfinite(v) or v < 0 for v in schedule)
                 or any(a >= b for a, b in zip(schedule, schedule[1:]))):
             raise ValueError("jitter_schedule must start at 0 and strictly increase.")
-        self._config = _Config(transform, gamma1, gamma2, schedule)
+        self._config = _Config(mode, transform, gamma1, gamma2, schedule)
         self._device = torch.device(device)
         self._d: int | None = None
         self.class_ids = torch.empty(0, dtype=torch.int64, device=self._device)
@@ -76,6 +85,11 @@ class FeCAM:
         self.score_prototypes = self.raw_prototypes.clone()
         self.factors = torch.empty((0, 0, 0), dtype=torch.float64, device=self._device)
         self.jitter_used = torch.empty(0, dtype=torch.float64, device=self._device)
+
+    @property
+    def mode(self) -> str:
+        """Return the fixed covariance mode: full or identity."""
+        return self._config.mode
 
     @property
     def num_classes(self) -> int:
@@ -145,6 +159,9 @@ class FeCAM:
 
         Each class must have >= 2 training samples. Repeated class IDs are rejected.
         New IDs are sorted within this call and appended after existing IDs.
+        Both modes require >= 2 samples for comparable input validation.
+        Identity mode skips covariance/shrinkage/normalization/factorization:
+        factors stays empty and jitter_used records zero for each class.
         """
         h = self._features(features, allow_empty=False)
         if not isinstance(labels, Tensor) or labels.dtype != torch.int64:
@@ -164,16 +181,18 @@ class FeCAM:
             if n < 2:
                 raise ValueError(f"Class {class_id}: need at least 2 samples, got {n}.")
             mu = h_y.mean(dim=0)
-            z_y = self._transform(h_y)
-            centered = z_y - z_y.mean(dim=0)
-            covariance = centered.T @ centered / (n - 1)
-            factor, jitter = self._build_factor(covariance, class_id)
+            jitter = 0.0
+            if self.mode == "full":
+                z_y = self._transform(h_y)
+                centered = z_y - z_y.mean(dim=0)
+                covariance = centered.T @ centered / (n - 1)
+                factor, jitter = self._build_factor(covariance, class_id)
+                factors.append(factor)
             score_mu = self._transform(mu)
             if not torch.isfinite(score_mu).all().item():
                 raise ValueError(f"Class {class_id}: prototype overflowed.")
             raw_means.append(mu)
             score_means.append(score_mu)
-            factors.append(factor)
             counts.append(n)
             jitters.append(jitter)
 
@@ -185,7 +204,8 @@ class FeCAM:
             append(self.class_ids, new_ids),
             append(self.raw_prototypes, torch.stack(raw_means)),
             append(self.score_prototypes, torch.stack(score_means)),
-            append(self.factors, torch.stack(factors)),
+            (append(self.factors, torch.stack(factors))
+             if self.mode == "full" else self.factors),
             append(self.counts, torch.tensor(counts, dtype=torch.int64, device=self._device)),
             append(self.jitter_used, torch.tensor(jitters, dtype=torch.float64, device=self._device)),
         )
@@ -197,6 +217,8 @@ class FeCAM:
     def distances(self, features: Tensor) -> Tensor:
         """Return squared Mahalanobis distances [B, C]; smaller is better.
 
+        In identity mode these are squared Euclidean distances between the
+        transformed query and transform(mean(raw class features)).
         Column j corresponds to class_ids[j]. These values are not probabilities.
         Query batches may be empty. Batch large query sets in the caller.
         """
@@ -208,11 +230,15 @@ class FeCAM:
             return result
         for column in range(self.num_classes):
             residual = z - self.score_prototypes[column]
-            # R = L L^T; v^T R^-1 v = ||L^-1 v||^2.
-            whitened = torch.linalg.solve_triangular(
-                self.factors[column], residual.T, upper=False
-            )
-            result[:, column] = whitened.square().sum(dim=0)
+            if self.mode == "identity":
+                # I is implicit; no d x d tensor or inverse is needed.
+                result[:, column] = residual.square().sum(dim=1)
+            else:
+                # R = L L^T; v^T R^-1 v = ||L^-1 v||^2.
+                whitened = torch.linalg.solve_triangular(
+                    self.factors[column], residual.T, upper=False
+                )
+                result[:, column] = whitened.square().sum(dim=0)
         if not torch.isfinite(result).all().item():
             raise FloatingPointError("Nonfinite distances; check feature scale and conditioning.")
         return result

@@ -1,5 +1,5 @@
 run_type,protocol,seed,class_order_seed,model,dataset,session,classes_seen,acc_all,avg_acc,acc_type
-smoke-test,cifar100-b50-i10-release-v1,1,1993,ncm,cifar100,0,5,36.0,36.0,Euclidean NCM
-smoke-test,cifar100-b50-i10-release-v1,1,1993,ncm,cifar100,1,10,18.0,27.0,Euclidean NCM
-smoke-test,cifar100-b50-i10-release-v1,1,1993,fecam,cifar100,0,5,24.0,24.0,Mahalanobis (FeCAM)
-smoke-test,cifar100-b50-i10-release-v1,1,1993,fecam,cifar100,1,10,33.0,28.5,Mahalanobis (FeCAM)
+smoke-test,cifar100-smoke-b5-i5-v1,1,1993,ncm,cifar100,0,5,74.0,74.0,Euclidean NCM (L2 normalized)
+smoke-test,cifar100-smoke-b5-i5-v1,1,1993,ncm,cifar100,1,10,42.8,58.4,Euclidean NCM (L2 normalized)
+smoke-test,cifar100-smoke-b5-i5-v1,1,1993,fecam,cifar100,0,5,76.8,76.8,Mahalanobis (FeCAM)
+smoke-test,cifar100-smoke-b5-i5-v1,1,1993,fecam,cifar100,1,10,51.7,64.25,Mahalanobis (FeCAM)

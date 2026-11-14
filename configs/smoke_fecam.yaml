@@ -23,6 +23,7 @@ loader:
   test_samples_per_class: 100
 classifier:
   name: fecam
+  mode: full
   per_class_covariance: true
   full_covariance: true
   tukey_beta: 0.5

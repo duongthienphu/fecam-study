@@ -37,6 +37,8 @@ Class-order seed `1993` và training seed `1` là hai giá trị riêng. Config 
 
 Smoke dùng **10 lớp đầu của cùng permutation 100 lớp**, B=5, increment=5; dùng toàn bộ 500 ảnh train và 100 ảnh test cho mỗi lớp đã chọn; 3 epoch, batch 16. Giới hạn 10 lớp và backbone 3 epoch có chủ đích để kiểm tra đường dữ liệu và không thuộc kết quả tái hiện đầy đủ.
 
+Smoke CPU ghép cặp mới nhất (07/11/2026), cùng seed và cấu hình train; mỗi lượt train backbone riêng nên chưa xác nhận checkpoint giống hệt bằng hash. NCM với L2 normalization đạt Avg=58.40%, Final=42.80%, BWT=−10.20 điểm %; FeCAM đạt Avg=64.25%, Final=51.70%, BWT=−14.00 điểm %. Task 0 accuracy lần lượt 74.0% và 76.8%; sau task 1, accuracy trên lớp cũ/mới lần lượt là NCM 63.8%/21.8%, FeCAM 62.8%/40.6%. Mỗi backbone train 3 epoch trên 2,500 ảnh của base task. Đây là smoke 10 lớp, không so trực tiếp với reproduction full CIFAR-100. Summary: `outputs/smoke-ncm-20261107-l2-normalized/summary.json` và `outputs/smoke-fecam-20261107-confirmed/summary.json`.
+
 ## Backbone và training đã chốt
 
 | Mục | Quyết định |
@@ -65,8 +67,8 @@ Implementation tái sử dụng [torchvision ResNet-18](https://docs.pytorch.org
 - `TaskSplit.classes(task, seen=False)` trả nhãn đã remap của lớp mới; `seen=True` trả tất cả lớp đã thấy.
 - `TaskDataset(..., source='train', seen=False, augment=False)` dùng trích xuất feature train task hiện tại; `source='test', seen=True` dùng đánh giá seen-classes. DataLoader trả `(images, labels)`.
 - `Backbone.extract_features(images)` trả **raw features** 512 chiều trước cosine head, chưa Tukey/chưa L2 normalize. Hàm dùng bởi runner là `src/engine/extract_features.py::extract_features`, trả tensor CPU `(features[N,512], labels[N])` đúng thứ tự loader, không gradient. `IncrementalNCM._forward_features()` cũng gọi trực tiếp `self.backbone.extract_features(imgs)`; tránh gọi `self.backbone(imgs)`, vì hàm `forward()` trả logits cosine-head chứ không phải embedding.
-- FeCAM thực hiện Tukey beta=0.5, covariance đầy đủ theo lớp, shrinkage gamma1=gamma2=1 và correlation normalization. NCM baseline dùng khoảng cách Euclidean trên feature và prototype gốc, không L2-normalize và không Tukey; cấu hình là `normalize_features: false`, `normalize_prototypes: false`. Avg Acc được tính từ accuracy của NCM/FeCAM ở từng phiên; cosine head không tham gia dự đoán incremental.
-- NCM/FeCAM dùng cùng checkpoint task đầu. Tính prototype/covariance từ train task hiện tại, giữ thống kê cần thiết; không lưu ảnh/feature mẫu cũ cho task sau. Runner chỉ lưu summary feature, không dump feature train ra đĩa.
+- FeCAM thực hiện Tukey beta=0.5, covariance đầy đủ theo lớp, shrinkage gamma1=gamma2=1 và correlation normalization. NCM dùng Euclidean với L2-normalize feature kiểm tra và prototype (`normalize_features: true`, `normalize_prototypes: true`), như code tác giả trong `BaseLearner._mahalanobis`; prototype được tính bằng mean của raw features trước khi chuẩn hóa ở bước dự đoán. FeCAM implementation hiện tại chưa L2-normalize feature/prototype như code tác giả; ghi nhận đây là sai khác khi đối chiếu. Avg Acc được tính từ accuracy của NCM/FeCAM ở từng phiên; cosine head không tham gia dự đoán incremental.
+- Reproduction NCM và FeCAM hiện train backbone riêng trong hai tiến trình với cùng cấu hình/seed; chưa xác minh hai checkpoint giống hệt. FeCAM `full` và `identity` trong notebook ablation dùng chung một checkpoint có hash để cô lập ảnh hưởng mode. Mỗi classifier tính prototype/covariance từ train task hiện tại và chỉ giữ thống kê cần thiết; không lưu ảnh/feature mẫu cũ cho task sau. Runner không dump feature train ra đĩa.
 - Checkpoint gồm weights, số lớp head và metadata plain gồm config/order/seed/phiên bản/hash code; nạp với `weights_only=True`, kiểm tra config/order trước extract. Không tương thích trực tiếp checkpoint của tác giả do tên module khác.
 
 ## Truy vết và giới hạn vận hành
