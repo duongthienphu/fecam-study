@@ -275,18 +275,8 @@ class IncrementalNCM:
         return np.concatenate(all_feats), np.concatenate(all_labels)
 
     def _forward_features(self, imgs: torch.Tensor) -> torch.Tensor:
-        """Forward qua backbone, trả về feature vector.
-        Hỗ trợ ResNet (output trực tiếp), ViT (dùng forward_features), và dict output.
-        """
-        out = self.backbone(imgs)
-        if isinstance(out, dict):
-            # BaseLearner style: {"logits": ..., "features": ...}
-            return out.get("features", out.get("logits"))
-        if isinstance(out, torch.Tensor):
-            return out
-        # timm ViT: dùng forward_features → lấy CLS token
-        feats = self.backbone.forward_features(imgs)
-        return feats[:, 0] if feats.ndim == 3 else feats
+        """Return the embedding before the backbone's classification head."""
+        return self.backbone.extract_features(imgs)
 
     # ------------------------------------------------------------------
     def run_task(

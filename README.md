@@ -2,7 +2,7 @@ FeCAM Study
 Tái hiện độc lập, phân tích và đánh giá FeCAM: Exploiting the Heterogeneity of Class Distributions in Exemplar-Free Continual Learning (NeurIPS 2023).
 
 Đồ án môn Nhập môn Học máy. Repository lưu mã nguồn, cấu hình thực nghiệm, tài liệu đọc hiểu và các kết quả phục vụ slide giữa kỳ, poster cuối kỳ.
-Trạng thái: Đang xây dựng cấu trúc và triển khai ban đầu. Phạm vi thực nghiệm dưới đây là kế hoạch; chưa có kết quả tái hiện được xác nhận. Các mục TODO cần cập nhật trước khi nộp.
+Trạng thái: Đã tích hợp pipeline smoke-test end-to-end cho NCM và FeCAM, gồm đánh giá incremental và các metrics chính. Kết quả smoke-test chỉ xác nhận pipeline hoạt động; chưa phải kết quả tái hiện đầy đủ của paper. Các mục TODO và phạm vi tái hiện đầy đủ cần tiếp tục cập nhật.
 
 1. Liên kết
 Nội dung	Liên kết
@@ -35,7 +35,7 @@ Phân tích bổ sung	Độ nhạy theo số mẫu mỗi lớp
 Khảo sát chi phí	Bộ nhớ và thời gian theo số lớp/số chiều đặc trưng
 
 
-Protocol data/backbone đã chốt trong [docs/protocol.md](docs/protocol.md): CIFAR-100 B=50, increment=10, class-order seed=1993, training seed=1. Xem [hướng dẫn pipeline](docs/data-backbone.md) và [kết quả kiểm chứng](docs/data-backbone-validation.md). Classifier và đánh giá incremental chưa được tích hợp.
+Protocol reproduction data/backbone đã chốt trong [docs/protocol.md](docs/protocol.md): CIFAR-100 B=50, increment=10, class-order seed=1993, training seed=1. Smoke-test dùng protocol rút gọn 5+5 lớp. NCM, FeCAM và đánh giá incremental đã được tích hợp trong `scripts/run_experiment.py`; xem [kết quả kiểm chứng](docs/data-backbone-validation.md). Cấu hình reproduction đầy đủ chưa được chạy xác nhận.
 
 Các run rút gọn dùng để kiểm tra pipeline phải được gắn nhãn smoke-test, không trình bày như kết quả tái hiện đầy đủ. NCM không thay thế toàn bộ các baseline cần thiết cho so sánh chính.
 4. Thành viên và phân công
@@ -82,12 +82,12 @@ Dữ liệu, checkpoint và lệnh thực nghiệm
 - Checkpoint dùng chung cần có URL tải, nguồn gốc, cấu hình huấn luyện và mã kiểm tra khi có. Không commit file trọng số vào Git.
 - Cache đặc trưng không được dùng để truy cập lại mẫu lớp cũ hoặc lớp tương lai trái với protocol exemplar-free đã chọn.
 - Không đưa token hoặc API key vào notebook, config hay repository.
-Entry point data/backbone nằm ở `src/scripts/run_experiment.py`. Xem lệnh chuẩn bị dữ liệu, smoke training và nạp checkpoint trong [docs/data-backbone.md](docs/data-backbone.md). Luồng này chưa chạy end-to-end FeCAM/NCM.
+Entry point đánh giá end-to-end nằm ở `scripts/run_experiment.py`. Mỗi lần chạy chọn một classifier từ YAML; hai smoke config dùng cùng protocol và khác classifier. Runner huấn luyện backbone theo cấu hình, cập nhật classifier qua từng task, đánh giá trên các lớp đã thấy và ghi summary trong `outputs/`. Xem thêm [hướng dẫn data/backbone](docs/data-backbone.md) cho các bước prepare/train-base/extract-features riêng.
 Tác vụ	Lệnh đã kiểm chứng
-Tải và chuẩn bị dữ liệu	python src/scripts/run_experiment.py prepare --config configs/reproduction/cifar100_fecam.yaml
-Chạy smoke backbone	python src/scripts/run_experiment.py train-base --config configs/smoke.yaml
-Huấn luyện backbone task đầu	Xem docs/data-backbone.md; cấu hình đầy đủ 200 epoch chưa chạy
-Tái hiện FeCAM và baseline	TODO
+Smoke-test NCM	python scripts/run_experiment.py --config configs/smoke.yaml --device cpu
+Smoke-test FeCAM	python scripts/run_experiment.py --config configs/smoke_fecam.yaml --device cpu
+Huấn luyện backbone reproduction	Runner huấn luyện task đầu theo config; cấu hình đầy đủ 200 epoch chưa chạy xác nhận
+Tái hiện FeCAM và baseline đầy đủ	TODO
 Chạy phân tích/stress-test	TODO
 Tổng hợp bảng và vẽ hình	TODO
 
@@ -99,7 +99,8 @@ W&B dùng các tag phân biệt: smoke-test, reproduction, analysis, research.
 
 Sau mỗi task, đánh giá riêng trên test set từng task đã gặp. Định nghĩa Average Incremental Accuracy, final accuracy và BWT nằm trong `docs/protocol.md`; FWT không log vì protocol không có baseline trước khi học trên lớp tương lai.
 Experiment	Script/notebook	Config	W&B run	Điều run cho thấy
-Smoke backbone	src/scripts/run_experiment.py	configs/smoke.yaml	Log local; W&B chưa tích hợp	Kiểm tra data/backbone; không dùng làm kết quả tái hiện
+Smoke-test NCM	scripts/run_experiment.py	configs/smoke.yaml	Đã upload lên project FeCAM-study (hiện private)	Kiểm tra pipeline NCM và metrics incremental; không dùng làm kết quả tái hiện
+Smoke-test FeCAM	scripts/run_experiment.py	configs/smoke_fecam.yaml	Đã upload lên project FeCAM-study (hiện private)	Kiểm tra pipeline FeCAM và metrics incremental; không dùng làm kết quả tái hiện
 Tái hiện so sánh chính	TODO	TODO	TODO	Chưa chạy/xác nhận
 Tái hiện ablation	TODO	TODO	TODO	Chưa chạy/xác nhận
 Phân tích số mẫu	TODO	TODO	TODO	Chưa chạy/xác nhận
