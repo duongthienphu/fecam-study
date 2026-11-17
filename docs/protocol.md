@@ -9,6 +9,10 @@ Chọn many-shot exemplar-free class-incremental learning, CIFAR-100 **B=50, inc
 
 Mục tiêu so sánh sau khi tích hợp classifier: Table 1, cột CIFAR-100 T=5; ablation tiếp theo: Table 4, cùng setting. Mốc paper: FeCAM per-class covariance Avg=70.9%, Last=62.1%; Euclidean-NCM Avg=64.8%, Last=51.6%. NCM là đối chứng đơn giản; không thay thế toàn bộ baseline của Table 1. Nguồn: [paper, §4.1, Tables 1/4](https://papers.neurips.cc/paper_files/paper/2023/file/15294ba2dcfb4521274f7aa1c26f4dd4-Paper-Conference.pdf).
 
+E1 Table 1's three-method protocol is now specified in [experiment-e1-table1.md](experiment-e1-table1.md). It requires one supplied seed-1 checkpoint for all classifiers; configs deliberately reject a missing checkpoint so the methods cannot silently train separate backbones. The comparison/report/W&B scripts are implemented, but the full E1 evaluation is still pending. The paper-average references are 64.8% (Eucl-NCM), 68.8% (FeCAM common covariance \(\Sigma^{1:t}\)), and 70.9% (FeCAM per-class covariance \(\Sigma_y\)).
+
+**E1 deviation:** group configs use weight decay `0.0005` to match the supplied teammate checkpoint. The paper reports `0.0001` for ResNet-18; therefore E1 is a controlled comparison against paper reference values, not an exact hyperparameter reproduction.
+
 Average incremental accuracy là trung bình top-1 accuracy trên tất cả lớp đã thấy sau **cả sáu task, gồm task đầu**; final accuracy là accuracy sau task cuối. Không lấy trung bình accuracy từng lớp/task con thay cho accuracy trên toàn bộ test seen-classes. Nguồn: [supplement §2](https://papers.nips.cc/paper_files/paper/2023/file/15294ba2dcfb4521274f7aa1c26f4dd4-Supplemental-Conference.pdf).
 
 ## Nguồn xác minh

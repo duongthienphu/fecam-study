@@ -10,9 +10,10 @@ Choices made explicit for this first implementation:
 * Eq. (8) shrinkage precedes Eq. (7) correlation normalization.
 * Eq. (10) distance-only score: no Gaussian log-determinant or prior term.
 * Cholesky factors replace explicit inverses. Optional jitter is recorded.
-* mode="full" preserves the original FeCAM covariance pipeline (default).
-* mode="identity" uses I implicitly: squared Euclidean distance after the same
-  feature/prototype transform, with no covariance or Cholesky factors stored.
+* covariance_mode="classwise" keeps one FeCAM covariance per class.
+* covariance_mode="shared" updates one class-averaged covariance across tasks.
+* covariance_mode="none" uses I implicitly: squared Euclidean distance after
+  the same feature/prototype transform, with no covariance factors stored.
   This is an ablation, not necessarily the project's NCM baseline.
   No eigenvalue/eigenvector compression is implemented.
 
@@ -39,14 +40,16 @@ from torch import Tensor
 @dataclass(frozen=True)
 class _Config:
     mode: str
+    covariance_mode: str
     transform: str
     gamma1: float
     gamma2: float
+    correlation_normalization: bool
     jitter_schedule: tuple[float, ...]
 
 
 class FeCAM:
-    """Per-class covariance classifier with atomic incremental updates.
+    """Incremental classifier with no, shared, or per-class covariance.
 
     Statistics and returned distances use float64 on ``device`` (CPU default).
     Returned labels/class_ids use int64 on that same device. Inputs are detached
@@ -58,14 +61,24 @@ class FeCAM:
         self,
         *,
         mode: str = "full",
+        covariance_mode: str | None = None,
         transform: str = "sqrt",
         gamma1: float = 1.0,
         gamma2: float = 1.0,
+        correlation_normalization: bool = True,
         jitter_schedule: Sequence[float] = (0.0, 1e-8, 1e-6, 1e-4, 1e-2),
         device: str | torch.device = "cpu",
     ) -> None:
         if mode not in ("full", "identity"):
             raise ValueError("mode must be 'full' or 'identity'.")
+        if covariance_mode is None:
+            covariance_mode = "classwise" if mode == "full" else "none"
+        if covariance_mode not in ("none", "shared", "classwise"):
+            raise ValueError("covariance_mode must be 'none', 'shared', or 'classwise'.")
+        if covariance_mode == "none" and mode == "full":
+            mode = "identity"
+        elif covariance_mode != "none":
+            mode = "full"
         if transform not in ("none", "sqrt"):
             raise ValueError("transform must be 'none' or 'sqrt'.")
         gamma1, gamma2 = float(gamma1), float(gamma2)
@@ -76,7 +89,10 @@ class FeCAM:
                 or any(not math.isfinite(v) or v < 0 for v in schedule)
                 or any(a >= b for a, b in zip(schedule, schedule[1:]))):
             raise ValueError("jitter_schedule must start at 0 and strictly increase.")
-        self._config = _Config(mode, transform, gamma1, gamma2, schedule)
+        self._config = _Config(
+            mode, covariance_mode, transform, gamma1, gamma2,
+            bool(correlation_normalization), schedule,
+        )
         self._device = torch.device(device)
         self._d: int | None = None
         self.class_ids = torch.empty(0, dtype=torch.int64, device=self._device)
@@ -85,11 +101,17 @@ class FeCAM:
         self.score_prototypes = self.raw_prototypes.clone()
         self.factors = torch.empty((0, 0, 0), dtype=torch.float64, device=self._device)
         self.jitter_used = torch.empty(0, dtype=torch.float64, device=self._device)
+        self._shared_covariance = torch.empty((0, 0), dtype=torch.float64, device=self._device)
 
     @property
     def mode(self) -> str:
         """Return the fixed covariance mode: full or identity."""
         return self._config.mode
+
+    @property
+    def covariance_mode(self) -> str:
+        """Return none, shared, or classwise covariance behavior."""
+        return self._config.covariance_mode
 
     @property
     def num_classes(self) -> int:
@@ -123,7 +145,7 @@ class FeCAM:
         return h.sqrt() if self._config.transform == "sqrt" else h
 
     def _build_factor(self, covariance: Tensor, class_id: int) -> tuple[Tensor, float]:
-        """Shrink -> correlation normalize -> factor; never silently use pinv."""
+        """Shrink, optionally correlation-normalize, then factor the matrix."""
         d = covariance.shape[0]
         covariance = (covariance + covariance.T) / 2
         eye = torch.eye(d, dtype=covariance.dtype, device=covariance.device)
@@ -139,13 +161,14 @@ class FeCAM:
                 f"Class {class_id}: invalid shrunk covariance (nonfinite or nonpositive diagonal). "
                 "Check constant features, sample counts and shrinkage parameters."
             )
-        std = shrunk.diagonal().sqrt()
-        correlation = shrunk / torch.outer(std, std)
-        correlation = (correlation + correlation.T) / 2
-        if not torch.isfinite(correlation).all().item():
-            raise ValueError(f"Class {class_id}: correlation normalization overflowed.")
+        if self._config.correlation_normalization:
+            std = shrunk.diagonal().sqrt()
+            shrunk = shrunk / torch.outer(std, std)
+            shrunk = (shrunk + shrunk.T) / 2
+            if not torch.isfinite(shrunk).all().item():
+                raise ValueError(f"Class {class_id}: correlation normalization overflowed.")
         for jitter in self._config.jitter_schedule:
-            factor, info = torch.linalg.cholesky_ex(correlation + jitter * eye)
+            factor, info = torch.linalg.cholesky_ex(shrunk + jitter * eye)
             if info.item() == 0 and torch.isfinite(factor).all().item():
                 return factor, jitter
         raise ValueError(
@@ -174,7 +197,7 @@ class FeCAM:
         if overlap:
             raise ValueError(f"Classes already learned: {sorted(overlap)}. Pass only new classes.")
 
-        raw_means, score_means, factors, counts, jitters = [], [], [], [], []
+        raw_means, score_means, factors, covariances, counts, jitters = [], [], [], [], [], []
         for class_id in new_ids.tolist():
             h_y = h[labels == class_id]
             n = h_y.shape[0]
@@ -182,12 +205,14 @@ class FeCAM:
                 raise ValueError(f"Class {class_id}: need at least 2 samples, got {n}.")
             mu = h_y.mean(dim=0)
             jitter = 0.0
-            if self.mode == "full":
+            if self.covariance_mode != "none":
                 z_y = self._transform(h_y)
                 centered = z_y - z_y.mean(dim=0)
                 covariance = centered.T @ centered / (n - 1)
-                factor, jitter = self._build_factor(covariance, class_id)
-                factors.append(factor)
+                covariances.append(covariance)
+                if self.covariance_mode == "classwise":
+                    factor, jitter = self._build_factor(covariance, class_id)
+                    factors.append(factor)
             score_mu = self._transform(mu)
             if not torch.isfinite(score_mu).all().item():
                 raise ValueError(f"Class {class_id}: prototype overflowed.")
@@ -200,17 +225,49 @@ class FeCAM:
         def append(old: Tensor, new: Tensor) -> Tensor:
             return torch.cat((old, new), dim=0) if self.num_classes else new
 
+        if self.covariance_mode == "shared":
+            # Paper Eq. (6): average the task covariance by the number of classes.
+            # CIFAR-100 has the same number of examples per class, so this is also
+            # the pooled within-class covariance for the configured protocol.
+            current_covariance = torch.stack(covariances).mean(dim=0)
+            old_classes = self.num_classes
+            new_classes = len(covariances)
+            if old_classes:
+                shared_covariance = (
+                    self._shared_covariance * old_classes
+                    + current_covariance * new_classes
+                ) / (old_classes + new_classes)
+            else:
+                shared_covariance = current_covariance
+            shared_factor, shared_jitter = self._build_factor(shared_covariance, -1)
+            factor_state = shared_factor.unsqueeze(0)
+            jitter_state = torch.tensor([shared_jitter], dtype=torch.float64, device=self._device)
+        elif self.covariance_mode == "classwise":
+            shared_covariance = self._shared_covariance
+            factor_state = append(self.factors, torch.stack(factors))
+            jitter_state = append(
+                self.jitter_used,
+                torch.tensor(jitters, dtype=torch.float64, device=self._device),
+            )
+        else:
+            shared_covariance = self._shared_covariance
+            factor_state = self.factors
+            jitter_state = append(
+                self.jitter_used,
+                torch.tensor(jitters, dtype=torch.float64, device=self._device),
+            )
+
         state = (
             append(self.class_ids, new_ids),
             append(self.raw_prototypes, torch.stack(raw_means)),
             append(self.score_prototypes, torch.stack(score_means)),
-            (append(self.factors, torch.stack(factors))
-             if self.mode == "full" else self.factors),
+            factor_state,
             append(self.counts, torch.tensor(counts, dtype=torch.int64, device=self._device)),
-            append(self.jitter_used, torch.tensor(jitters, dtype=torch.float64, device=self._device)),
+            jitter_state,
         )
         (self.class_ids, self.raw_prototypes, self.score_prototypes,
          self.factors, self.counts, self.jitter_used) = state
+        self._shared_covariance = shared_covariance
         self._d = h.shape[1]
 
     @torch.no_grad()
@@ -230,13 +287,14 @@ class FeCAM:
             return result
         for column in range(self.num_classes):
             residual = z - self.score_prototypes[column]
-            if self.mode == "identity":
+            if self.covariance_mode == "none":
                 # I is implicit; no d x d tensor or inverse is needed.
                 result[:, column] = residual.square().sum(dim=1)
             else:
                 # R = L L^T; v^T R^-1 v = ||L^-1 v||^2.
+                factor_index = column if self.covariance_mode == "classwise" else 0
                 whitened = torch.linalg.solve_triangular(
-                    self.factors[column], residual.T, upper=False
+                    self.factors[factor_index], residual.T, upper=False
                 )
                 result[:, column] = whitened.square().sum(dim=0)
         if not torch.isfinite(result).all().item():
