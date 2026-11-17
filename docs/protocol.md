@@ -13,6 +13,8 @@ E1 Table 1's three-method protocol is now specified in [experiment-e1-table1.md]
 
 **E1 deviation:** group configs use weight decay `0.0005` to match the supplied teammate checkpoint. The paper reports `0.0001` for ResNet-18; therefore E1 is a controlled comparison against paper reference values, not an exact hyperparameter reproduction.
 
+E3 seed stability reuses all three E1 seed-1 runs, then adds the same three classifiers for training seeds 2 and 3. It fixes class-order seed 1993; within each training seed all methods share one backbone checkpoint. Details and resume instructions are in [experiment-e3-seed-stability.md](experiment-e3-seed-stability.md).
+
 Average incremental accuracy là trung bình top-1 accuracy trên tất cả lớp đã thấy sau **cả sáu task, gồm task đầu**; final accuracy là accuracy sau task cuối. Không lấy trung bình accuracy từng lớp/task con thay cho accuracy trên toàn bộ test seen-classes. Nguồn: [supplement §2](https://papers.nips.cc/paper_files/paper/2023/file/15294ba2dcfb4521274f7aa1c26f4dd4-Supplemental-Conference.pdf).
 
 ## Nguồn xác minh

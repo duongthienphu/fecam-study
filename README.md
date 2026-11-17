@@ -91,6 +91,8 @@ E1 — paired Table 1 methods	configs/experiments/e1_*.yaml + `scripts/run_exper
 E1 — report CSV and plot	python scripts/report_e1.py <ncm-summary> <shared-summary> <classwise-summary>
 E1 — upload grouped runs to W&B	python scripts/upload_e1_to_wandb.py <ncm-summary> <shared-summary> <classwise-summary>
 Tái hiện FeCAM và baseline đầy đủ	E1 pipeline is implemented; full E1 has not yet been run/verified
+E3 — seed stability	python scripts/run_e3.py; reuses the three E1 seed-1 summaries and runs seeds 2–3
+E3 — aggregate CSV/plot	scripts/report_e3.py creates per-seed and mean±sample-std results
 Chạy phân tích/stress-test	TODO
 Tổng hợp bảng và vẽ hình	TODO
 
@@ -105,6 +107,7 @@ Experiment	Script/notebook	Config	W&B run	Điều run cho thấy
 Smoke-test NCM	scripts/run_experiment.py	configs/smoke.yaml	Đã upload lên project FeCAM-study (hiện private)	Kiểm tra pipeline NCM và metrics incremental; không dùng làm kết quả tái hiện
 Smoke-test FeCAM	scripts/run_experiment.py	configs/smoke_fecam.yaml	Đã upload lên project FeCAM-study (hiện private)	Kiểm tra pipeline FeCAM và metrics incremental; không dùng làm kết quả tái hiện
 E1 Table 1 (NCM/shared/classwise)	scripts/run_experiment.py	configs/experiments/e1_*.yaml	`scripts/upload_e1_to_wandb.py` (after runs)	Pipeline implemented; awaits supplied seed-1 backbone checkpoint and full evaluation
+E3 seed stability	scripts/run_e3.py	Reuses E1 configs for seeds 2 and 3	`scripts/upload_e3_to_wandb.py` (after runs)	Pipeline implemented; awaits seed-1 E1 summaries and seed-2/3 checkpoints or GPU training
 Tái hiện ablation	TODO	TODO	TODO	Chưa chạy/xác nhận
 Phân tích số mẫu	TODO	TODO	TODO	Chưa chạy/xác nhận
 Khảo sát chi phí	TODO	TODO	TODO	Chưa chạy/xác nhận
