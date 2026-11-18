@@ -6,9 +6,9 @@ backbone training seed across 1, 2, and 3. The three classifier runs within a
 seed must use that seed's same checkpoint. Seed-1 evaluations are reused from
 E1; E3 adds six classifier evaluations for seeds 2 and 3.
 
-The three E1 configs are reused with their training seed changed. All use the
-group's weight decay 0.0005; this differs from the paper's 0.0001 and must stay
-visible in the E3 table and report. Each missing seed-2/3 backbone is trained
+The three E1 configs are reused with their training seed changed. All use
+weight decay 0.0001, matching the paper and the supplied seed-1 checkpoint.
+Each missing seed-2/3 backbone is trained
 once with the E1 backbone recipe. Training checkpoints are saved each epoch and
 `run_e3.py` resumes interrupted training from that checkpoint.
 

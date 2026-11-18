@@ -5,14 +5,9 @@ from Table 1 of the FeCAM paper. All three runs must load the **same frozen
 base checkpoint**, use training seed 1 and class-order seed 1993, and evaluate
 all six sessions (base session 0 plus incremental sessions 1–5).
 
-The current E1 configs use weight decay `0.0005` to match the seed-1 checkpoint
-trained by the group. The paper reports `0.0001` for ResNet-18 training, so this
-is a deliberate protocol deviation. The 64.8/68.8/70.9 values below remain
-paper reference points, but E1 must be described as a controlled group
-comparison against those references, not an exact hyperparameter reproduction.
-Keep paper-faithful `0.0001` configs separate if the team also wants an
-exact-protocol reproduction; a `0.0005` checkpoint cannot be used for that run
-because the runner validates checkpoint/training metadata.
+The current E1 configs use weight decay `0.0001`, matching the supplied seed-1
+checkpoint and the paper's ResNet-18 training setting. The 64.8/68.8/70.9 values
+below are the paper reference points for the three methods.
 
 | Group method | Config | Covariance | Paper Avg Acc. |
 |---|---|---|---:|
@@ -43,7 +38,7 @@ python scripts/run_experiment.py evaluate --config configs/experiments/e1_fecam_
 ```
 
 `--output` must be new for each run. On CPU, replace `cuda:0` with `cpu`.
-The checkpoint must have been trained with weight decay `0.0005` and the other
+The checkpoint must have been trained with weight decay `0.0001` and the other
 training settings in the E1 YAMLs.
 Each summary records the checkpoint SHA-256, class-order list and hash, full
 config, per-session seen accuracy, Avg/Final/BWT and (for FeCAM) matrix storage

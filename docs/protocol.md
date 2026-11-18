@@ -11,7 +11,7 @@ Mục tiêu so sánh sau khi tích hợp classifier: Table 1, cột CIFAR-100 T=
 
 E1 Table 1's three-method protocol is now specified in [experiment-e1-table1.md](experiment-e1-table1.md). It requires one supplied seed-1 checkpoint for all classifiers; configs deliberately reject a missing checkpoint so the methods cannot silently train separate backbones. The comparison/report/W&B scripts are implemented, but the full E1 evaluation is still pending. The paper-average references are 64.8% (Eucl-NCM), 68.8% (FeCAM common covariance \(\Sigma^{1:t}\)), and 70.9% (FeCAM per-class covariance \(\Sigma_y\)).
 
-**E1 deviation:** group configs use weight decay `0.0005` to match the supplied teammate checkpoint. The paper reports `0.0001` for ResNet-18; therefore E1 is a controlled comparison against paper reference values, not an exact hyperparameter reproduction.
+**E1/E3 backbone setting:** weight decay is `0.0001`, matching the paper's ResNet-18 setting and the supplied seed-1 checkpoint. The classifier comparisons use a shared checkpoint within each seed.
 
 E3 seed stability reuses all three E1 seed-1 runs, then adds the same three classifiers for training seeds 2 and 3. It fixes class-order seed 1993; within each training seed all methods share one backbone checkpoint. Details and resume instructions are in [experiment-e3-seed-stability.md](experiment-e3-seed-stability.md).
 

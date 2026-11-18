@@ -52,8 +52,8 @@ def main(argv=None):
             config=config,
             notes=(
                 'Paired E3 run: all three methods for this training seed share one '
-                'backbone checkpoint and class order. Group weight decay is 0.0005; '
-                'the paper reports 0.0001 for ResNet-18.'
+                'backbone checkpoint and class order. Weight decay is 0.0001 '
+                'for ResNet-18, matching the paper and checkpoint metadata.'
             ),
         )
         try:

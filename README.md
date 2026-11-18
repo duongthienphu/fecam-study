@@ -87,7 +87,7 @@ Tác vụ	Lệnh hoặc trạng thái
 Smoke-test NCM	python scripts/run_experiment.py --config configs/smoke.yaml --device cpu
 Smoke-test FeCAM	python scripts/run_experiment.py --config configs/smoke_fecam.yaml --device cpu
 Huấn luyện backbone reproduction	Runner huấn luyện task đầu theo config; cấu hình đầy đủ 200 epoch chưa chạy xác nhận
-E1 — paired Table 1 methods	configs/experiments/e1_*.yaml + `scripts/run_experiment.py`; group checkpoint uses weight decay 0.0005, requires supplied seed-1 checkpoint
+E1 — paired Table 1 methods	configs/experiments/e1_*.yaml + `scripts/run_experiment.py`; checkpoint uses weight decay 0.0001, requires supplied seed-1 checkpoint
 E1 — report CSV and plot	python scripts/report_e1.py <ncm-summary> <shared-summary> <classwise-summary>
 E1 — upload grouped runs to W&B	python scripts/upload_e1_to_wandb.py <ncm-summary> <shared-summary> <classwise-summary>
 Tái hiện FeCAM và baseline đầy đủ	E1 pipeline is implemented; full E1 has not yet been run/verified

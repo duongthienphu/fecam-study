@@ -71,8 +71,8 @@ def validate_summaries(summaries):
         classifier_configs[key] = config['classifier']
         if config['split']['class_order_seed'] != 1993:
             raise ValueError('E3 must keep class_order_seed=1993 for every training seed')
-        if config['training']['weight_decay'] != 0.0005:
-            raise ValueError('E3 configs must match the group checkpoint weight_decay=0.0005')
+        if config['training']['weight_decay'] != 0.0001:
+            raise ValueError('E3 configs must match the checkpoint weight_decay=0.0001')
         class_orders.add(summary['class_order_sha256'])
         checkpoints_by_seed.setdefault(seed, set()).add(summary['checkpoint_sha256'])
         comparable_config = config.copy()
