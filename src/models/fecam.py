@@ -6,7 +6,9 @@ No images, exemplars, optimizer, or backbone are stored here.
 
 Choices made explicit for this first implementation:
 * Prototype = transform(mean(raw_features)); covariance = cov(transformed_features).
-* Sample covariance uses n - 1. No additional L2 feature normalization.
+* Sample covariance uses n - 1, computed from the Tukey-transformed raw features.
+* L2-normalize prototypes after Tukey transform. For queries, normalize before
+  Tukey transform and again before distance scoring, matching the authors' code.
 * Eq. (8) shrinkage precedes Eq. (7) correlation normalization.
 * Eq. (10) distance-only score: no Gaussian log-determinant or prior term.
 * Cholesky factors replace explicit inverses. Optional jitter is recorded.
@@ -17,8 +19,8 @@ Choices made explicit for this first implementation:
   This is an ablation, not necessarily the project's NCM baseline.
   No eigenvalue/eigenvector compression is implemented.
 
-These choices follow the project specification, not a verified match to the
-authors' source code. This is not yet a benchmark reproduction.
+The L2-normalization order follows the authors' released implementation.
+Other implementation details remain independently implemented.
 
 Example:
     classifier = FeCAM(transform="sqrt", gamma1=1.0, gamma2=1.0)
@@ -42,6 +44,8 @@ class _Config:
     mode: str
     covariance_mode: str
     transform: str
+    normalize_features: bool
+    normalize_prototypes: bool
     gamma1: float
     gamma2: float
     correlation_normalization: bool
@@ -63,6 +67,8 @@ class FeCAM:
         mode: str = "full",
         covariance_mode: str | None = None,
         transform: str = "sqrt",
+        normalize_features: bool = True,
+        normalize_prototypes: bool = True,
         gamma1: float = 1.0,
         gamma2: float = 1.0,
         correlation_normalization: bool = True,
@@ -90,7 +96,8 @@ class FeCAM:
                 or any(a >= b for a, b in zip(schedule, schedule[1:]))):
             raise ValueError("jitter_schedule must start at 0 and strictly increase.")
         self._config = _Config(
-            mode, covariance_mode, transform, gamma1, gamma2,
+            mode, covariance_mode, transform, bool(normalize_features),
+            bool(normalize_prototypes), gamma1, gamma2,
             bool(correlation_normalization), schedule,
         )
         self._device = torch.device(device)
@@ -183,8 +190,8 @@ class FeCAM:
         Each class must have >= 2 training samples. Repeated class IDs are rejected.
         New IDs are sorted within this call and appended after existing IDs.
         Both modes require >= 2 samples for comparable input validation.
-        Identity mode skips covariance/shrinkage/normalization/factorization:
-        factors stays empty and jitter_used records zero for each class.
+        Identity mode skips covariance/shrinkage/correlation-normalization/
+        factorization: factors stays empty and jitter_used records zero per class.
         """
         h = self._features(features, allow_empty=False)
         if not isinstance(labels, Tensor) or labels.dtype != torch.int64:
@@ -214,6 +221,8 @@ class FeCAM:
                     factor, jitter = self._build_factor(covariance, class_id)
                     factors.append(factor)
             score_mu = self._transform(mu)
+            if self._config.normalize_prototypes:
+                score_mu = torch.nn.functional.normalize(score_mu, p=2, dim=0)
             if not torch.isfinite(score_mu).all().item():
                 raise ValueError(f"Class {class_id}: prototype overflowed.")
             raw_means.append(mu)
@@ -275,13 +284,18 @@ class FeCAM:
         """Return squared Mahalanobis distances [B, C]; smaller is better.
 
         In identity mode these are squared Euclidean distances between the
-        transformed query and transform(mean(raw class features)).
+        normalized transformed query and normalized transformed prototypes.
         Column j corresponds to class_ids[j]. These values are not probabilities.
         Query batches may be empty. Batch large query sets in the caller.
         """
         if not self.num_classes:
             raise RuntimeError("Call update before prediction.")
-        z = self._transform(self._features(features, allow_empty=True))
+        h = self._features(features, allow_empty=True)
+        if self._config.normalize_features:
+            h = torch.nn.functional.normalize(h, p=2, dim=1)
+        z = self._transform(h)
+        if self._config.normalize_features:
+            z = torch.nn.functional.normalize(z, p=2, dim=1)
         result = z.new_empty((z.shape[0], self.num_classes))
         if z.shape[0] == 0:
             return result

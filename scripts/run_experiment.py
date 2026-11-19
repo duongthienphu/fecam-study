@@ -78,13 +78,13 @@ def load_config(path):
     loader = config['loader']
     if loader.get('batch_size', 0) < 2 or loader.get('num_workers', -1) < 0:
         raise ValueError('Require batch_size >= 2 and num_workers >= 0')
-    if config['experiment'] in ('reproduction', 'e1-table1'):
+    if config['experiment'] in ('reproduction', 'e1-table1', 'e3-seed-stability'):
         if (config['split']['total_classes'] != 100
                 or config['loader']['train_samples_per_class'] is not None
                 or config['loader']['test_samples_per_class'] is not None):
             raise ValueError('Reproduction configs must use all classes and all samples')
     elif config['experiment'] != 'smoke-test':
-        raise ValueError('Supported experiment values are smoke-test, reproduction, and e1-table1')
+        raise ValueError('Supported experiment values are smoke-test, reproduction, e1-table1, and e3-seed-stability')
     if config['experiment'] == 'e1-table1':
         split_config = config['split']
         if (split_config['total_classes'] != 100
@@ -94,6 +94,15 @@ def load_config(path):
             raise ValueError('E1 requires CIFAR-100 B=50, increment=10, class_order_seed=1993')
         if not config.get('require_checkpoint', False):
             raise ValueError('E1 configs must set require_checkpoint: true')
+    if config['experiment'] == 'e3-seed-stability':
+        split_config = config['split']
+        if (split_config['total_classes'] != 100
+                or split_config['initial_classes'] != 50
+                or split_config['increment'] != 10
+                or split_config['class_order_seed'] != 1993):
+            raise ValueError('E3 requires CIFAR-100 B=50, increment=10, class_order_seed=1993')
+        if config['seed'] not in (1, 2, 3):
+            raise ValueError('E3 supports training seeds 1, 2, and 3')
     return config
 
 
@@ -407,6 +416,8 @@ def main(argv=None):
                 mode=classifier_cfg.get('mode', 'full'),
                 covariance_mode=classifier_cfg.get('covariance_mode'),
                 transform='sqrt' if beta is not None else 'none',
+                normalize_features=classifier_cfg.get('normalize_features', True),
+                normalize_prototypes=classifier_cfg.get('normalize_prototypes', True),
                 gamma1=classifier_cfg.get('shrinkage_gamma1', 1.0),
                 gamma2=classifier_cfg.get('shrinkage_gamma2', 1.0),
                 correlation_normalization=classifier_cfg.get('correlation_normalization', True),
