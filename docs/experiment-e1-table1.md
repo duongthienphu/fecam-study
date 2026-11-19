@@ -8,8 +8,9 @@ all six sessions (base session 0 plus incremental sessions 1–5).
 The current E1 configs use weight decay `0.0001`, matching the supplied seed-1
 checkpoint and the paper's ResNet-18 training setting. The 64.8/68.8/70.9 values
 below are the paper reference points for the three methods.
-Euclidean NCM uses raw features and prototypes (`normalize_features: false`,
-`normalize_prototypes: false`) to match the paper's Euclidean distance baseline.
+Euclidean NCM L2-normalizes test features and prototypes before computing
+Euclidean distance, matching the authors' released implementation. The paper's
+compact Eq. (2) does not spell out that implementation detail.
 
 | Group method | Config | Covariance | Paper Avg Acc. |
 |---|---|---|---:|
