@@ -27,6 +27,8 @@ classifier:
   covariance_mode: classwise
   full_covariance: true
   tukey_beta: 0.5
+  normalize_features: true
+  normalize_prototypes: true
   shrinkage_gamma1: 1.0
   shrinkage_gamma2: 1.0
   correlation_normalization: true

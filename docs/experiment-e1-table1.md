@@ -11,6 +11,9 @@ below are the paper reference points for the three methods.
 Euclidean NCM L2-normalizes test features and prototypes before computing
 Euclidean distance, matching the authors' released implementation. The paper's
 compact Eq. (2) does not spell out that implementation detail.
+FeCAM shared and classwise modes now also normalize query features and
+transformed prototypes at scoring time, following the authors' released code;
+covariance estimates continue to use transformed training features.
 
 | Group method | Config | Covariance | Paper Avg Acc. |
 |---|---|---|---:|
