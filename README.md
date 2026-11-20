@@ -83,11 +83,16 @@ Dữ liệu, checkpoint và lệnh thực nghiệm
 - Cache đặc trưng không được dùng để truy cập lại mẫu lớp cũ hoặc lớp tương lai trái với protocol exemplar-free đã chọn.
 - Không đưa token hoặc API key vào notebook, config hay repository.
 Entry point đánh giá end-to-end nằm ở `scripts/run_experiment.py`. Mỗi lần chạy chọn một classifier từ YAML; hai smoke config dùng cùng protocol và khác classifier. Runner huấn luyện backbone theo cấu hình, cập nhật classifier qua từng task, đánh giá trên các lớp đã thấy và ghi summary trong `outputs/`. Xem thêm [hướng dẫn data/backbone](docs/data-backbone.md) cho các bước prepare/train-base/extract-features riêng.
-Tác vụ	Lệnh đã kiểm chứng
+Tác vụ	Lệnh hoặc trạng thái
 Smoke-test NCM	python scripts/run_experiment.py --config configs/smoke.yaml --device cpu
 Smoke-test FeCAM	python scripts/run_experiment.py --config configs/smoke_fecam.yaml --device cpu
 Huấn luyện backbone reproduction	Runner huấn luyện task đầu theo config; cấu hình đầy đủ 200 epoch chưa chạy xác nhận
-Tái hiện FeCAM và baseline đầy đủ	TODO
+E1 — paired Table 1 methods	configs/experiments/e1_*.yaml + `scripts/run_experiment.py`; checkpoint uses weight decay 0.0001, requires supplied seed-1 checkpoint
+E1 — report CSV and plot	python scripts/report_e1.py <ncm-summary> <shared-summary> <classwise-summary>
+E1 — upload grouped runs to W&B	python scripts/upload_e1_to_wandb.py <ncm-summary> <shared-summary> <classwise-summary>
+Tái hiện FeCAM và baseline đầy đủ	E1 pipeline is implemented; full E1 has not yet been run/verified
+E3 — seed stability	python scripts/run_e3.py; reuses the three E1 seed-1 summaries and runs seeds 2–3
+E3 — aggregate CSV/plot	scripts/report_e3.py creates per-seed and mean±sample-std results
 Chạy phân tích/stress-test	TODO
 Tổng hợp bảng và vẽ hình	TODO
 
@@ -101,7 +106,8 @@ Sau mỗi task, đánh giá riêng trên test set từng task đã gặp. Địn
 Experiment	Script/notebook	Config	W&B run	Điều run cho thấy
 Smoke-test NCM	scripts/run_experiment.py	configs/smoke.yaml	Đã upload lên project FeCAM-study (hiện private)	Kiểm tra pipeline NCM và metrics incremental; không dùng làm kết quả tái hiện
 Smoke-test FeCAM	scripts/run_experiment.py	configs/smoke_fecam.yaml	Đã upload lên project FeCAM-study (hiện private)	Kiểm tra pipeline FeCAM và metrics incremental; không dùng làm kết quả tái hiện
-Tái hiện so sánh chính	TODO	TODO	TODO	Chưa chạy/xác nhận
+E1 Table 1 (NCM/shared/classwise)	scripts/run_experiment.py	configs/experiments/e1_*.yaml	`scripts/upload_e1_to_wandb.py` (after runs)	Pipeline implemented; awaits supplied seed-1 backbone checkpoint and full evaluation
+E3 seed stability	scripts/run_e3.py	Reuses E1 configs for seeds 2 and 3	`scripts/upload_e3_to_wandb.py` (after runs)	Pipeline implemented; awaits seed-1 E1 summaries and seed-2/3 checkpoints or GPU training
 Tái hiện ablation	TODO	TODO	TODO	Chưa chạy/xác nhận
 Phân tích số mẫu	TODO	TODO	TODO	Chưa chạy/xác nhận
 Khảo sát chi phí	TODO	TODO	TODO	Chưa chạy/xác nhận

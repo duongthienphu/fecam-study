@@ -55,15 +55,21 @@ def load_config(path):
             raise ValueError('NCM metric must be euclidean or cosine')
         if classifier.get('normalize_features', True) != classifier.get('normalize_prototypes', True):
             raise ValueError('NCM normalizes features and prototypes together')
+        if classifier.get('covariance_mode', 'none') != 'none':
+            raise ValueError('NCM must use covariance_mode=none')
     elif classifier.get('name') == 'fecam':
         mode = classifier.get('mode', 'full')
         if mode not in ('full', 'identity'):
             raise ValueError('FeCAM mode must be full or identity')
-        if mode == 'full' and (
-                not classifier.get('per_class_covariance')
-                or not classifier.get('full_covariance')
-                or not classifier.get('correlation_normalization')):
-            raise ValueError('FeCAM full mode requires per-class full covariance and correlation normalization')
+        covariance_mode = classifier.get(
+            'covariance_mode', 'classwise' if mode == 'full' else 'none'
+        )
+        if covariance_mode not in ('none', 'shared', 'classwise'):
+            raise ValueError('FeCAM covariance_mode must be none, shared, or classwise')
+        if covariance_mode != 'none' and not classifier.get('full_covariance'):
+            raise ValueError('FeCAM shared/classwise modes require full covariance')
+        if covariance_mode == 'classwise' and not classifier.get('correlation_normalization'):
+            raise ValueError('FeCAM classwise covariance requires correlation normalization')
         if classifier.get('tukey_beta') not in (None, 0.5):
             raise ValueError('This implementation supports Tukey beta=0.5 or no transform')
     else:
@@ -72,13 +78,31 @@ def load_config(path):
     loader = config['loader']
     if loader.get('batch_size', 0) < 2 or loader.get('num_workers', -1) < 0:
         raise ValueError('Require batch_size >= 2 and num_workers >= 0')
-    if config['experiment'] == 'reproduction':
+    if config['experiment'] in ('reproduction', 'e1-table1', 'e3-seed-stability'):
         if (config['split']['total_classes'] != 100
                 or config['loader']['train_samples_per_class'] is not None
                 or config['loader']['test_samples_per_class'] is not None):
             raise ValueError('Reproduction configs must use all classes and all samples')
     elif config['experiment'] != 'smoke-test':
-        raise ValueError('Supported experiment values are smoke-test and reproduction')
+        raise ValueError('Supported experiment values are smoke-test, reproduction, e1-table1, and e3-seed-stability')
+    if config['experiment'] == 'e1-table1':
+        split_config = config['split']
+        if (split_config['total_classes'] != 100
+                or split_config['initial_classes'] != 50
+                or split_config['increment'] != 10
+                or split_config['class_order_seed'] != 1993):
+            raise ValueError('E1 requires CIFAR-100 B=50, increment=10, class_order_seed=1993')
+        if not config.get('require_checkpoint', False):
+            raise ValueError('E1 configs must set require_checkpoint: true')
+    if config['experiment'] == 'e3-seed-stability':
+        split_config = config['split']
+        if (split_config['total_classes'] != 100
+                or split_config['initial_classes'] != 50
+                or split_config['increment'] != 10
+                or split_config['class_order_seed'] != 1993):
+            raise ValueError('E3 requires CIFAR-100 B=50, increment=10, class_order_seed=1993')
+        if config['seed'] not in (1, 2, 3):
+            raise ValueError('E3 supports training seeds 1, 2, and 3')
     return config
 
 
@@ -223,6 +247,10 @@ def main(argv=None):
     if args.resume and (args.action not in ('train-base', 'evaluate') or not args.output):
         parser.error('--resume requires train-base/evaluate and an explicit --output directory')
     config = load_config(args.config)
+    if config.get('require_checkpoint') and args.action != 'evaluate':
+        parser.error('This experiment requires evaluate with a provided shared checkpoint')
+    if config.get('require_checkpoint') and not args.checkpoint:
+        parser.error('This experiment requires --checkpoint; backbone training is disabled')
     split = TaskSplit(**config['split'])
     split.classes(args.task)
     if args.action == 'extract-features' and not args.checkpoint:
@@ -265,6 +293,9 @@ def main(argv=None):
     manifest = {
         'action': args.action, 'started_utc': started.isoformat(), 'status': 'running',
         'config': config, 'class_order': split.class_order, 'tasks': split.tasks,
+        'class_order_sha256': hashlib.sha256(
+            json.dumps(split.class_order, separators=(',', ':')).encode('utf-8')
+        ).hexdigest(),
         'label_map': split.label_map, 'device': device,
         'assigned_gpu': os.environ.get('FECAM_ASSIGNED_GPU', device),
         'provenance': provenance(),
@@ -383,9 +414,14 @@ def main(argv=None):
             beta = classifier_cfg.get('tukey_beta')
             classifier = FeCAM(
                 mode=classifier_cfg.get('mode', 'full'),
+                covariance_mode=classifier_cfg.get('covariance_mode'),
                 transform='sqrt' if beta is not None else 'none',
+                normalize_features=classifier_cfg.get('normalize_features', True),
+                normalize_prototypes=classifier_cfg.get('normalize_prototypes', True),
                 gamma1=classifier_cfg.get('shrinkage_gamma1', 1.0),
-                gamma2=classifier_cfg.get('shrinkage_gamma2', 1.0), device='cpu',
+                gamma2=classifier_cfg.get('shrinkage_gamma2', 1.0),
+                correlation_normalization=classifier_cfg.get('correlation_normalization', True),
+                device='cpu',
             )
             update = classifier.update
             predict = lambda features: classifier.predict(features).cpu().numpy()
@@ -403,8 +439,8 @@ def main(argv=None):
                 # FeCAM persists Cholesky factors as its per-class matrix state.
                 # Measure the actual backing storage after each incremental update.
                 matrix_storage_by_task.append({
-                    'task': task_id,
-                    'mode': classifier.mode,
+                    'task': task_id, 'mode': classifier.mode,
+                    'covariance_mode': classifier.covariance_mode,
                     'classes_stored': classifier.num_classes,
                     'matrix_state': tensor_storage_record(classifier.factors),
                 })

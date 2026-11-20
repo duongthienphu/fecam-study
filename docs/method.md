@@ -321,7 +321,7 @@ Khi cài đặt, cần thêm trường hợp Tukey để phát hiện lỗi th�
 | Vấn đề | Hiện đã biết / lựa chọn đề xuất | Cách xử lý trước khi tuyên bố tái lập |
 | --- | --- | --- |
 | Prototype qua Tukey | Algorithm 1 tính mean gốc; Eq. 10 dùng prototype đã biến đổi | Đối chiếu mã tác giả; giữ `prototype_mode` rõ ràng |
-| Feature/prototype L2 normalization | Phần method được đọc mô tả rõ Tukey và correlation normalization, chưa đủ để kết luận mọi chi tiết L2 trong code | Kiểm tra nguồn tham khảo và ghi thứ tự nếu có; không nhầm ba phép biến đổi |
+| Feature/prototype L2 normalization | Mã tác giả chuẩn hóa query trước Tukey, chuẩn hóa query sau Tukey và chuẩn hóa prototype sau Tukey trước khi tính khoảng cách | Đã đối chiếu `models/base.py`; tách riêng khỏi correlation normalization của covariance |
 | Mẫu số covariance | Đề xuất $n_y-1$ | Đối chiếu estimator của implementation |
 | Covariance chung $S_t$ | Eq. 6 cho trọng số theo số lớp, mô tả cách tính $S_t$ cần làm rõ | Xác nhận trước khi thêm common baseline |
 | Suy biến/không dương xác định | Có thể xảy ra dù đã shrinkage | Log chẩn đoán/jitter; không đổi metric âm thầm |
